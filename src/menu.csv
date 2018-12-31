@@ -1,0 +1,10 @@
+; These are the ROMs that come standard
+EXIT TO BASIC,0,0
+DRIVEWIRE HDBDOS,2,2
+ORCHESTRA 90,7,2
+DOODLE BUG,9,2
+BUZZARD BAIT,13,34
+TEMPLE OF ROM,21,2
+
+; Here is a new one I added
+DUNGEONS OF DAGGORATH,28,2

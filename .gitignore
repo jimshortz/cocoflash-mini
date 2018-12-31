@@ -1,0 +1,6 @@
+*.bin
+*.lst
+*.wav
+*.rom
+rom2wav
+makemenu
