@@ -322,10 +322,10 @@ int main(int argc, char **argv)
 
     /* Write header block */
     char fmt[64];
-    sprintf(fmt, "  %-12.12s BANK=%-4d KB=%-4d", basename(in_filename),
+    sprintf(fmt, " %-12.12s\rBANK=%-4d KB=%-4d", basename(in_filename),
             start_bank, kb_count);
     strupr(fmt);
-    fmt[31] = erase ? 'E' : ' ';
+    fmt[31] = 0;
     memcpy(pgm_header.banner, fmt, 32); 
     pgm_header.start_bank = BE_UINT16(start_bank | (erase ? 0x8000 : 0));
     pgm_header.kb_count = BE_UINT16(kb_count);

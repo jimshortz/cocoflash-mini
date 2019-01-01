@@ -27,13 +27,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CoCo ROM entry vectors
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+chrout  equ     $a002
 csrdon  equ     $a004
 blkin   equ     $a006
 
 ; Memory locations
-text    equ     $0400           ; Text screen
-textend equ     text+(16*32)    ; End of screen
-map_start equ   text+64         ; 3rd line of screen
 rstflg  equ     $71
 blktyp  equ     $7c
 blklen  equ     $7d
@@ -57,57 +55,50 @@ motor   equ     $08             ; Tape motor control bit (PIA1)
 hdrlen  equ     36              ; Size of header block
 hdrtyp  equ     3               ; Type of header block
 
-; Status characters
-rev     equ     $3f             ; AND to get reverse video
-norm    equ     $40             ; OR to get normal video
-c_unk   equ     '?' & rev       ; Not blank checked yet
-c_full  equ     'X' & rev       ; Failed blank check
-c_empty equ     '.' & rev       ; Passed blank check
-c_read  equ     'R' & rev       ; Reading from tape
-c_write equ     'W' & rev       ; Writing to rom
-c_ok    equ     '*' & rev       ; Written successfully
-c_fail  equ     '!' & rev       ; Failed to write
-c_erase equ     'E' & rev       ; Erasing bank
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 main    lds     #casbuf+64      ; Move stack to low RAM
         clr     rstflg          ; Reset button does cold start
-        jsr     clrscn
+        clr     curpos+1        ; Return to home
+        ldx     #hello
+abort   jsr     prstr
+        ldx     #wait
+        jsr     prstr
+1       jsr     readhdr
+        bne     1b              ; Silently retry to avoid noisy condition
+                                ; after a blank check fails but the PC
+                                ; keeps sending.
 
-abort   jsr     read_hdr
-        bne     abort
-
-        ; Perform blank check
-        jsr     reset
-        jsr     draw            
-1       jsr     bcheck          ; Check a 1KB block
-        beq     2f              ; Skip if clean
+        ; Perform blank check/erase
+        ldx     #bck
         lda     start_bank      ; Are we in erase mode?
-        bpl     abort           ; Abort if not
-        jsr     ERASE
-2       jsr     next_kb
-        bne     1b
+        bpl     1f
+        ldx     #ermsg          ; Change message if so
+1       jsr     reset
+2       jsr     bcheck          ; Check a 1KB block
+        beq     4f              ; Skip if clean
+        lda     start_bank      ; Are we in erase mode?
+        bmi     3f              ; If yes, attempt erase
+        ldx     #blkerr         ; Error if not
+        bpl     abort 
+3       jsr     ERASE
+4       jsr     next_kb
+        bne     2b
 
         ; Download and program chunks
+        ldx     #wrmsg
         jsr     reset
-3       jsr     read_kb         ; Read 1KB from the tape
-        bne     abort
-        jsr     PGMBLK          ; Burn it to flash
-        bne     abort
-        jsr     next_kb
-        bne     3b
+1       jsr     read_kb         ; Read 1KB from the tape
+        beq     2f
+        ldx     #terr
         bra     abort
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-; Clears the screen and homes the cursor
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-clrscn  ldx     #text
-        stx     curpos
-        lda     #$60
-1       sta     ,x+
-        cmpx    #textend
-        blo     1b
-        rts
+2       jsr     PGMBLK          ; Burn it to flash
+        beq     3f
+        ldx     #wrterr
+        bra     abort
+3       jsr     next_kb
+        bne     1b
+        ldx     #succ
+        bra     abort
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Reads the header block
@@ -117,14 +108,7 @@ clrscn  ldx     #text
 ;   start_bank  = First bank to program
 ;   kb_cnt      = Number of KB to program
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-read_hdr
-        ldx     #map_start      ; Turn the gauge to normal background
-1       lda     ,x
-        ora     #norm
-        sta     ,x+
-        cmpx    #textend
-        blo     1b
-2       jsr     [csrdon]        ; Turn on the tape
+readhdr jsr     [csrdon]        ; Turn on the tape
         ldx     #buf
         stx     cbufad
         jsr     [blkin]         ; Read header block
@@ -143,39 +127,18 @@ read_hdr
         ldd     buf+34
         std     kb_cnt
 
+        ldx     #buf            ; Print banner
+        jsr     prstr
+
         clra                    ; Return OK
 1       rts
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Draws the progress map on the screen
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-draw
-        jsr     clrscn
-        ldx     #buf            ; Copy banner to top line
-        ldy     #text
-1       lda     ,x+
-        anda    #rev            ; Set normal background
-        ora     #norm
-        sta     ,y+
-        cmpx    #buf+32
-        blo     1b
-
-        ldx     kb_cnt          ; Fill with unknowns
-        ldy     #map_start
-        sty     curpos
-        lda     #c_unk
-2       sta     ,y+
-        leax    -1,x
-        bne     2b
-        rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 ; Return to first bank and set target pointer
 ;
 ; On exit, X=target location, Y = number of KB remianing, Z=at end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-reset   ldx     #map_start          ; Reset cursor to beginning of map
-        stx     curpos
+reset   jsr     prstr
         ldd     start_bank          ; Reset bank pointer
         anda    #$7                 ; Remove extra bits
         sta     bank_hi
@@ -191,22 +154,22 @@ reset   ldx     #map_start          ; Reset cursor to beginning of map
 ;
 ; On exit, X=target location, Y = number of KB remaining, Z=at end
 ;
-next_kb inc     curpos+1        ; Advance cursor one character
-        bcc     1f
-        inc     curpos
-1       ldx     target
+next_kb lda     #'.'
+        jsr     [chrout]
+        ldx     target
         leax    1024,x          ; Move forward 1KB
         cmpx    #$d000          ; Have we reached end of ROM window?
         blo     2f
         ldx     #$c000          ; Reset to beginning of ROM window
-        inc     bank_lo         ; And move to the next bank
-        bcc     2f
-        inc     bank_hi
+        ldd     bank_lo         ; And move to next bank
+        exg     a,b
+        adda    #1
+        exg     a,b
+        std     bank_lo
 2       stx     target
         ldy     kb_rem          ; Decrement kb_rem
         leay    -1,y
         sty     kb_rem
-        cmpy    #0
         rts
         
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -214,26 +177,19 @@ next_kb inc     curpos+1        ; Advance cursor one character
 ;
 ; Outputs: Z=0 if blank
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-bcheck  ldb     #c_full         ; Park "bad" status in B register
-        ldx     target          ; Iterate from target to target+1KB
+bcheck  ldx     target          ; Iterate from target to target+1KB
         ldy     #1024
 1       lda     ,x+
         coma                    ; Make sure it is $ff
         bne     2f
         leay    -1,y
         bne     1b
-        ldb     #c_empty        ; Successful - use "good" status`
-        clra                    ; Return OK
-2       stb     [curpos]        ; Write status to screen
-        cmpa    #0              ; Reload Z register
-        rts
+2       rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Erase bank
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-ERASE   LDB     #c_erase
-        STA     [curpos]
-        ORCC    #$50    ; Disable interrupts
+ERASE   ORCC    #$50    ; Disable interrupts
         ;STA    $FFDE   ; Enable ROM in memory map
         LDA     #$81    ; Set bits for LED on and write enable
         STA     FCNTRL  ; Send to flash card control register
@@ -259,9 +215,7 @@ CHKERA  LDA     $C000   ; Get a test data byte
 ;   buf - Contents of chunk
 ;   Z=0 - No error
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-read_kb ldb     #c_read         ; Update status display to 'reading'
-        stb     [curpos]
-        ldx     #buf            ; Reset cassette buffer to buf
+read_kb ldx     #buf            ; Reset cassette buffer to buf
         stx     cbufad
 1       jsr     [blkin]
         bne     2f              ; Did an error occur?
@@ -275,9 +229,7 @@ read_kb ldb     #c_read         ; Update status display to 'reading'
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Writes 1KB of data from target -> ROM
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-PGMBLK  LDB     #c_write
-        STB     [curpos]
-        LDX         #buf
+PGMBLK  LDX         #buf
         LDY         target
         ORCC       #$50   ;Disable interrupts
 ;        STA        $FFDE  ;Enable ROM in memory map
@@ -323,8 +275,6 @@ PPOLL2  LDA        $C000  ; Poll the operation status
         BRA        LOOP   ; Go try again
 ;EXIT   STA        $FFDF  ; Disable ROM in memory map
 EXIT    ANDCC      #$AF   ; Enable interrupts
-        LDB         #c_ok
-        STB     [curpos]
         CLRA
         STA        FCNTRL ; Turn off write access and LED
         RTS
@@ -333,8 +283,6 @@ FAIL    ANDCC      #$AF         ; Enable interrupts
         CLRA
         STA     FCNTRL          ; Turn off write access and LED
         STY     target          ; For debugging
-        LDA     #c_fail         ; Also causes Z=0 (error)
-        STA     [curpos]
         RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -345,6 +293,25 @@ PREAMB  LDA        #$AA
         LDA        #$55
         STA        $C555
         RTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+prstr   lda ,x+
+        beq 2f
+        jsr [chrout]
+        bra prstr
+2       rts
+
+wait    fcc "READY",0
+bck     fcc 13,"CHECKING ",0
+ermsg   fcc 13,"ERASING  ",0
+wrmsg   fcc 13,"WRITING  ",0
+terr    fcc 13,"tape err",13,0
+blkerr  fcc 13,"not blank",13,0
+wrterr  fcc 13,"pgm err",13,0
+succ    fcc 13,"DONE",13,0
+
+; This message can be overwritten by buf
+hello   fcc "COCOFLASH MINI LOADER V0.9"
+        fcc 13,"(C)2018 - JIM SHORTZ",13,0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables
