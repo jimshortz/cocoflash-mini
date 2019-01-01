@@ -52,15 +52,13 @@ mpak    equ     $ff7f
 pia1    equ     $ff21
 motor   equ     $08             ; Tape motor control bit (PIA1)
 
-hdrlen  equ     36              ; Size of header block
+hdrlen  equ     48              ; Size of header block
 hdrtyp  equ     3               ; Type of header block
+ssize   equ     64              ; Size of stack to allocate
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-main    lds     #casbuf+64      ; Move stack to low RAM
-        clr     rstflg          ; Reset button does cold start
-        clr     curpos+1        ; Return to home
-        ldx     #hello
-abort   jsr     prstr
+; NOTE - main is at the bottom so its space can be reused
+mloop   jsr     prstr
         ldx     #wait
         jsr     prstr
 1       jsr     readhdr
@@ -69,7 +67,7 @@ abort   jsr     prstr
                                 ; keeps sending.
 
         ; Perform blank check/erase
-        ldx     #bck
+        ldx     #bckmsg
         lda     start_bank      ; Are we in erase mode?
         bpl     1f
         ldx     #ermsg          ; Change message if so
@@ -79,7 +77,7 @@ abort   jsr     prstr
         lda     start_bank      ; Are we in erase mode?
         bmi     3f              ; If yes, attempt erase
         ldx     #blkerr         ; Error if not
-        bpl     abort 
+        bpl     mloop 
 3       jsr     ERASE
 4       jsr     next_kb
         bne     2b
@@ -89,16 +87,16 @@ abort   jsr     prstr
         jsr     reset
 1       jsr     read_kb         ; Read 1KB from the tape
         beq     2f
-        ldx     #terr
-        bra     abort
+        ldx     #taperr
+        bra     mloop
 2       jsr     PGMBLK          ; Burn it to flash
         beq     3f
         ldx     #wrterr
-        bra     abort
+        bra     mloop
 3       jsr     next_kb
         bne     1b
         ldx     #succ
-        bra     abort
+        bra     mloop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Reads the header block
@@ -122,12 +120,13 @@ readhdr jsr     [csrdon]        ; Turn on the tape
         cmpa    #hdrlen
         bne     1f
 
-        ldd     buf+32          ; Extract start_bank and kb_cnt
+        ldd     buf             ; Extract start_bank and kb_cnt
         std     start_bank
-        ldd     buf+34
+
+        ldd     buf+2
         std     kb_cnt
 
-        ldx     #buf            ; Print banner
+        ldx     #buf+4          ; Print banner
         jsr     prstr
 
         clra                    ; Return OK
@@ -161,11 +160,9 @@ next_kb lda     #'.'
         cmpx    #$d000          ; Have we reached end of ROM window?
         blo     2f
         ldx     #$c000          ; Reset to beginning of ROM window
-        ldd     bank_lo         ; And move to next bank
-        exg     a,b
-        adda    #1
-        exg     a,b
-        std     bank_lo
+        inc     bank_lo
+        bne     2f
+        inc     bank_hi
 2       stx     target
         ldy     kb_rem          ; Decrement kb_rem
         leay    -1,y
@@ -293,6 +290,7 @@ PREAMB  LDA        #$AA
         LDA        #$55
         STA        $C555
         RTS
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 prstr   lda ,x+
         beq 2f
@@ -300,23 +298,64 @@ prstr   lda ,x+
         bra prstr
 2       rts
 
-wait    fcc "READY",0
-bck     fcc 13,"CHECKING ",0
-ermsg   fcc 13,"ERASING  ",0
-wrmsg   fcc 13,"WRITING  ",0
-terr    fcc 13,"tape err",13,0
-blkerr  fcc 13,"not blank",13,0
-wrterr  fcc 13,"pgm err",13,0
-succ    fcc 13,"DONE",13,0
+; Everything below this point is only used at startup
+; and can safely overlap with buf
 
-; This message can be overwritten by buf
+main    lds     #stack+ssize-1  ; Move stack to low RAM
+        clr     rstflg          ; Reset button does cold start
+        ldx     #reloc_s        ; Relocate messages into casbuf
+        ldy     #reloc_t
+1       lda     ,x+
+        sta     ,y+
+        cmpx    #reloc_e
+        bne     1b
+        clr     curpos+1        ; Return to home
+        ldx     #hello
+        lbra    mloop           ; Enter the main loop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Messages
+;
+; Everything in this block gets relocated into casbuf
+; to make room for the transfer buffer.  Hence the weird label
+; stuff
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+reloc_s
+wait    equ * + reloc_t - reloc_s
+        fcc 13,"RECEIVING",13,0
+
+bckmsg  equ * + reloc_t - reloc_s
+        fcc 13,"CHECKING ",0
+
+ermsg   equ * + reloc_t - reloc_s
+        fcc 13,"ERASING  ",0
+
+wrmsg   equ * + reloc_t - reloc_s
+        fcc 13,"WRITING  ",0
+
+taperr  equ * + reloc_t - reloc_s
+        fcc 13,"tape err",13,0
+
+blkerr  equ * + reloc_t - reloc_s
+        fcc 13,"not blank",13,0
+
+wrterr  equ * + reloc_t - reloc_s
+        fcc 13,"pgm err",13,0
+
+succ    equ * + reloc_t - reloc_s
+        fcc 13,"SUCCESS",13,0
+reloc_e
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 hello   fcc "COCOFLASH MINI LOADER V0.9"
         fcc 13,"(C)2018 - JIM SHORTZ",13,0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-    org casbuf+66
+    org casbuf
+reloc_t         rmb     reloc_e-reloc_s ; Relocated message strings
+stack           rmb     ssize   ; Relocated stack
 start_bank      rmb     2       ; Starting bank
 kb_cnt          rmb     2       ; Number of 1KB units to download
 kb_rem          rmb     2       ; Number of 1KB units remaining in current pass

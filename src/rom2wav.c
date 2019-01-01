@@ -21,6 +21,7 @@
 #define PI 3.1415926
 #define BLOCK_SIZE 255
 #define BATCH_SIZE 1024
+#define BANNER_SIZE 44
 
 #define ERASE_SECS_PER_KB 0.03
 #define BCHECK_SECS_PER_KB 0.03
@@ -53,9 +54,9 @@ int             buffer_1200_length,
 
 /* Describes ROM to CoCo loader */
 struct {
-    char    banner[32];
     uint16  start_bank;
     uint16  kb_count;
+    char    banner[BANNER_SIZE];
 } pgm_header;
 
 /* WAVE file header */
@@ -322,16 +323,16 @@ int main(int argc, char **argv)
 
     /* Write header block */
     char fmt[64];
-    sprintf(fmt, " %-12.12s\rBANK=%-4d KB=%-4d", basename(in_filename),
-            start_bank, kb_count);
+    sprintf(fmt, "FILE=%-16.16s\rBANK=%-4d\rSIZE=%-4dKB", 
+            basename(in_filename), start_bank, kb_count);
+    //printf("WIDTH=%ld sizeof=%ld\n", strlen(fmt), sizeof(pgm_header));
     strupr(fmt);
-    fmt[31] = 0;
-    memcpy(pgm_header.banner, fmt, 32); 
+    memcpy(pgm_header.banner, fmt, BANNER_SIZE); 
     pgm_header.start_bank = BE_UINT16(start_bank | (erase ? 0x8000 : 0));
     pgm_header.kb_count = BE_UINT16(kb_count);
 
     if (verbose) {
-        printf("Writing header: %-30s erase=%d\n", pgm_header.banner, erase);
+        printf("Writing header: start_bank=%d erase=%d\n", start_bank, erase);
     }
 
     write_leader();
