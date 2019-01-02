@@ -27,6 +27,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CoCo ROM entry vectors
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+polcat  equ     $a000
 chrout  equ     $a002
 csrdon  equ     $a004
 blkin   equ     $a006
@@ -52,14 +53,17 @@ mpak    equ     $ff7f
 pia1    equ     $ff21
 motor   equ     $08             ; Tape motor control bit (PIA1)
 
-hdrlen  equ     48              ; Size of header block
 hdrtyp  equ     3               ; Type of header block
 ssize   equ     64              ; Size of stack to allocate
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; NOTE - main is at the bottom so its space can be reused
+main    lds     #stack+ssize-1  ; Move stack to low RAM
+        clr     rstflg          ; Reset button does cold start
+        clr     curpos+1        ; Return to home
+        ldx     #hello
 mloop   jsr     prstr
-        ldx     #wait
+
+mloop1  ldx     #wait
         jsr     prstr
 1       jsr     readhdr
         bne     1b              ; Silently retry to avoid noisy condition
@@ -73,30 +77,38 @@ mloop   jsr     prstr
         ldx     #ermsg          ; Change message if so
 1       jsr     reset
 2       jsr     bcheck          ; Check a 1KB block
-        beq     4f              ; Skip if clean
+        beq     3f              ; Skip if clean
         lda     start_bank      ; Are we in erase mode?
-        bmi     3f              ; If yes, attempt erase
-        ldx     #blkerr         ; Error if not
-        bpl     mloop 
-3       jsr     ERASE
-4       jsr     next_kb
+        bpl     abort
+        jsr     ERASE
+3       jsr     next_kb
         bne     2b
+        jsr     meter
 
         ; Download and program chunks
         ldx     #wrmsg
         jsr     reset
 1       jsr     read_kb         ; Read 1KB from the tape
-        beq     2f
-        ldx     #taperr
-        bra     mloop
-2       jsr     PGMBLK          ; Burn it to flash
-        beq     3f
-        ldx     #wrterr
-        bra     mloop
-3       jsr     next_kb
+        bne     abort
+        jsr     PGMBLK          ; Burn it to flash
+        bne     abort
+        jsr     next_kb
         bne     1b
+
+        ; Print OK message and receive next file
         ldx     #succ
         bra     mloop
+
+abort   ldx     #failmsg        ; Return FAIL unless this was a tape error
+        lda     csrerr
+        beq     1f
+        ldx     #taperr
+1       jsr     prstr
+        ldx     #again
+        jsr     prstr
+2       jsr     [polcat]
+        beq     2b
+        jmp     mloop1
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Reads the header block
@@ -107,7 +119,7 @@ mloop   jsr     prstr
 ;   kb_cnt      = Number of KB to program
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 readhdr jsr     [csrdon]        ; Turn on the tape
-        ldx     #buf
+        ldx     #header
         stx     cbufad
         jsr     [blkin]         ; Read header block
         lda     csrerr          ; Check for errors
@@ -117,45 +129,42 @@ readhdr jsr     [csrdon]        ; Turn on the tape
         bne     1f
        
         lda     blklen          ; Verify block length
-        cmpa    #hdrlen
+        cmpa    #buf-header
         bne     1f
 
-        ldd     buf             ; Extract start_bank and kb_cnt
-        std     start_bank
-
-        ldd     buf+2
-        std     kb_cnt
-
-        ldx     #buf+4          ; Print banner
+        ldx     #bnkmsg         ; Print starting bank
         jsr     prstr
+        ldd     start_bank
+        anda    #7              ; Mask off mode bits
+        jsr     prnum
 
-        clra                    ; Return OK
+        clra
 1       rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 ; Return to first bank and set target pointer
 ;
-; On exit, X=target location, Y = number of KB remianing, Z=at end
+; Outputs:
+;   Z=1 If at end, Z=0 if more blocks remain
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-reset   jsr     prstr
+reset   jsr     prstr               ; Print phase
         ldd     start_bank          ; Reset bank pointer
         anda    #$7                 ; Remove extra bits
         sta     bank_hi
         stb     bank_lo
         ldx     #$c000              ; Reset target pointer
         stx     target
-        ldy     kb_cnt              ; Reset block counter
-        sty     kb_rem
-        rts
+        clr     kb_cur              ; Reset KB counter
+        clr     kb_cur+1
+        jmp     meter
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 ; Advance bank and target pointer to next 1k block
 ;
-; On exit, X=target location, Y = number of KB remaining, Z=at end
-;
-next_kb lda     #'.'
-        jsr     [chrout]
-        ldx     target
+; Outputs:
+;   Z=1 If at end, Z=0 if more blocks remain
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+next_kb ldx     target
         leax    1024,x          ; Move forward 1KB
         cmpx    #$d000          ; Have we reached end of ROM window?
         blo     2f
@@ -164,11 +173,27 @@ next_kb lda     #'.'
         bne     2f
         inc     bank_hi
 2       stx     target
-        ldy     kb_rem          ; Decrement kb_rem
-        leay    -1,y
-        sty     kb_rem
-        rts
+        ldy     kb_cur          ; Increment kb_cur
+        leay    1,y
+        sty     kb_cur
+        ; Fall through
         
+meter   lda     curpos+1        ; Reset cursor to column 10
+        anda    #$e0
+        ora     #10
+        sta     curpos+1
+        ldd     kb_cur          ; Print out current block num
+        jsr     prnum
+        lda     #'/'
+        jsr     [chrout]
+        ldd     kb_cnt          ; Print out total kb
+        jsr     prnum
+        ldx     #kbmsg          ; And postfix message
+        jsr     prstr
+        ldy     kb_cur          ; Set Z flag if at end
+        cmpy    kb_cnt
+        rts
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Blank check current 1KB block
 ;
@@ -217,10 +242,9 @@ read_kb ldx     #buf            ; Reset cassette buffer to buf
 1       jsr     [blkin]
         bne     2f              ; Did an error occur?
         stx     cbufad          ; Advance to next block
-        lda     blklen
-        cmpa    #255            ; Keep reading until we get a partial
-        beq     1b
-        clra                    ; Return OK
+        lda     blktyp
+        coma                    ; Keep reading until we get an EOF block
+        bne     1b
 2       rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -298,69 +322,52 @@ prstr   lda ,x+
         bra prstr
 2       rts
 
-; Everything below this point is only used at startup
-; and can safely overlap with buf
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-main    lds     #stack+ssize-1  ; Move stack to low RAM
-        clr     rstflg          ; Reset button does cold start
-        ldx     #reloc_s        ; Relocate messages into casbuf
-        ldy     #reloc_t
-1       lda     ,x+
-        sta     ,y+
-        cmpx    #reloc_e
-        bne     1b
-        clr     curpos+1        ; Return to home
-        ldx     #hello
-        lbra    mloop           ; Enter the main loop
+prnum   equ $bdcc
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Messages
-;
-; Everything in this block gets relocated into casbuf
-; to make room for the transfer buffer.  Hence the weird label
-; stuff
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-reloc_s
-wait    equ * + reloc_t - reloc_s
-        fcc 13,"RECEIVING",13,0
-
-bckmsg  equ * + reloc_t - reloc_s
-        fcc 13,"CHECKING ",0
-
-ermsg   equ * + reloc_t - reloc_s
-        fcc 13,"ERASING  ",0
-
-wrmsg   equ * + reloc_t - reloc_s
-        fcc 13,"WRITING  ",0
-
-taperr  equ * + reloc_t - reloc_s
-        fcc 13,"tape err",13,0
-
-blkerr  equ * + reloc_t - reloc_s
-        fcc 13,"not blank",13,0
-
-wrterr  equ * + reloc_t - reloc_s
-        fcc 13,"pgm err",13,0
-
-succ    equ * + reloc_t - reloc_s
-        fcc 13,"SUCCESS",13,0
-reloc_e
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+wait    fcc 13,"RECEIVING",13,0
+bnkmsg  fcc    "BANK      ",0
+kbmsg   fcc " KB ",0
+bckmsg  fcc 13,"CHECKING",0
+ermsg   fcc 13,"ERASING",0
+wrmsg   fcc 13,"WRITING",0
+failmsg fcc 32,"FAILED",13,0
+taperr  fcc 32,"TAPE ERROR",13,0
+succ    fcc 13,"SUCCESS",13,0
+again   fcc 13,"ANY KEY TO RETRY",0
 hello   fcc "COCOFLASH MINI LOADER V0.9"
         fcc 13,"(C)2018 - JIM SHORTZ",13,0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Header block
+;
+; The host header block is downloaded directly here.  Make sure it
+; matches struct pgm_header in rom2wav.c
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+header  
+start_bank      rmb     2       ; Starting bank
+kb_cnt          rmb     2       ; Number of 1KB units to download
+fname           rmb     16      ; File name
+hdr_end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Data buffer
+;
+; This must fit within available host memory
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+buf             rmb     1024
+bufend          
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     org casbuf
-reloc_t         rmb     reloc_e-reloc_s ; Relocated message strings
-stack           rmb     ssize   ; Relocated stack
-start_bank      rmb     2       ; Starting bank
-kb_cnt          rmb     2       ; Number of 1KB units to download
-kb_rem          rmb     2       ; Number of 1KB units remaining in current pass
+stack           rmb     ssize   ; Replacement stack
+kb_cur          rmb     2       ; Current 1KB block being processed
 target          rmb     2       ; Pointer to read/write
 
-buf             equ     $800
-bufend          equ     buf+1024
         end     main

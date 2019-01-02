@@ -56,7 +56,7 @@ int             buffer_1200_length,
 struct {
     uint16  start_bank;
     uint16  kb_count;
-    char    banner[BANNER_SIZE];
+    char    fname[16];
 } pgm_header;
 
 /* WAVE file header */
@@ -319,20 +319,18 @@ int main(int argc, char **argv)
     }
 
     /* Write some initial silence just to get everything going */
-    write_silence(1);
+    write_silence(0.25);
 
     /* Write header block */
-    char fmt[64];
-    sprintf(fmt, "FILE=%-16.16s\rBANK=%-4d\rSIZE=%-4dKB", 
-            basename(in_filename), start_bank, kb_count);
-    //printf("WIDTH=%ld sizeof=%ld\n", strlen(fmt), sizeof(pgm_header));
+    char fmt[18];
+    sprintf(fmt, "%-16.16s", basename(in_filename));
     strupr(fmt);
-    memcpy(pgm_header.banner, fmt, BANNER_SIZE); 
+    memcpy(pgm_header.fname, fmt, 16);
     pgm_header.start_bank = BE_UINT16(start_bank | (erase ? 0x8000 : 0));
     pgm_header.kb_count = BE_UINT16(kb_count);
 
     if (verbose) {
-        printf("Writing header: start_bank=%d erase=%d\n", start_bank, erase);
+        printf("Writing header: start_bank=%d erase=%d fname=%s\n", start_bank, erase, fmt);
     }
 
     write_leader();
@@ -364,12 +362,13 @@ int main(int argc, char **argv)
             len -= block_len;
         }
 
+        /* EOF block */
+        write_block(0xff, NULL, 0);
+
         /* Write silence to give the CoCo time to do its work */
         write_silence(PGM_SECS_PER_KB);
     }
 
-    /* EOF block */
-    write_block(0xff, NULL, 0);
 
     fclose(input);
     close_outfile();
