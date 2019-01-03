@@ -69,27 +69,7 @@ By default, programming will fail if any block of the target ROM is already in u
 Passing the `-e` option will cause the target blocks to be erased first.  *Use with caution*
 as this could cause neighboring ROMs to be erased as well due to idiosyncrasies of the 
 CocoFLASH ROM and banking structure.  Consult the CocoFLASH documentation for an explanation
-of this or follow my simple guideline - choose a starting bank of 28 plus a multiple of 32.
-
-# Status displays
-
-Since `loader.bin` has to fit in 512 bytes, certain liberties were taken with the
-user feedback.  Basically, it writes a graph indicating current progress.  Each block
-in the graph represents a 1KB chunk and its status is indicated by the following:
-
-Character | Meaning | Error
--|-|-
-?  | Not yet blank checked | No
-space | Blank | No
-`X` | Not blank | Yes
-`R` | Reading from tape | No
-`W` | Writing to ROM | No
-`*` | Written successfully | No
-`!` | Error writing | Yes
-
-A successful burn is indicated by all stars.  If an error occurs, no further
-actions are attempted.  In either case the program is ready to accept a new WAV
-file.  If no more burns are required, press reset button to exit.
+of this or simply always choose a starting bank of 28 plus a multiple of 32.
 
 # Updating the menu
 
