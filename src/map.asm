@@ -192,7 +192,7 @@ resel   addd    addr
 3       rts
                       
 vdraw   jsr     clrscn
-        ldx     #view_menu
+        ldx     #v_menu
         jsr     draw
         jsr     drawbnk
         jsr     drawadr
@@ -216,7 +216,7 @@ amode   ldd     #a_keys
         ; fall through
 
 adraw   jsr     clrscn
-        ldx     #view_menu
+        ldx     #a_menu
         jsr     draw
         jsr     drawbnk
         jsr     drawadr
@@ -324,7 +324,7 @@ m_keys  kmap    'P',    m_prev
         kmap    kright, m_right
         kmap    kup,    m_up
         kmap    kdown,  m_down
-        kmap    'V',    view
+        kmap    'H',    view
         kmap    'A',    amode
         kmap    'X',    exit
         fcb     0
@@ -339,7 +339,7 @@ v_keys  kmap    'P',    v_prev
 a_keys  kmap    'P',    a_prev 
         kmap    'N',    a_next
         kmap    'M',    map
-        kmap    'V',    view
+        kmap    'H',    view
         kmap    'X',    exit
         fcb     0
 
@@ -352,20 +352,35 @@ bnkpos  equ     text+32*1+26
 addrpos equ     text+32*4+26
 
 map_menu
-        stext   0,26,"BANK"
-        stext   6,24,"(E)RASE"
-        stext   7,24,"(V)IEW"
-        stext   8,24,"(N)EXT"
-        stext   9,24,"(P)REV"
+        stext   0,26,   "BANK"
+        stext   6,24, "(E)RASE"
+        stext   7,24, "(H)EX"
+        stext   8,24, "(A)SCII"
+        stext   9,24, "(N)EXT"
+        stext   10,24,"(P)REV"
+        stext   11,24,"E(X)IT"
         fdb     $ffff
 
-view_menu
-        stext   0,26,"BANK"
-        stext   3,26,"ADDR"
-        stext   6,24,"(E)RASE"
-        stext   7,24,"(M)AP"
-        stext   8,24,"(N)EXT"
-        stext   9,24,"(P)REV"
+v_menu
+        stext   0,26,    "BANK"
+        stext   3,26,    "ADDR"
+        stext   6,24, "(E)RASE"
+        stext   7,24, "(M)AP"
+        stext   8,24, "(A)SCII"
+        stext   9,24,"(N)EXT"
+        stext   10,24,"(P)REV"
+        stext   11,24,"E(X)IT"
+        fdb     $ffff
+
+a_menu
+        stext   0,26,    "BANK"
+        stext   3,26,    "ADDR"
+        stext   6,24, "(E)RASE"
+        stext   7,24, "(M)AP"
+        stext   8,24, "(H)EX"
+        stext   9,24, "(N)EXT"
+        stext   10,24,"(P)REV"
+        stext   11,24,"E(X)IT"
         fdb     $ffff
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
