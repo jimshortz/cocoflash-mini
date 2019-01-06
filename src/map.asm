@@ -78,27 +78,29 @@ drawadr ldy     #addrpos
 
 map     ldd     #m_keys
         std     keymap
+        clr     addr
+        clr     addr+1
         jmp     mdraw
 
 m_prev  ldd     #-256
-        bra     resel
+        bra     m_resel
 
 m_next  ldd     #256
-        bra     resel
+        bra     m_resel
 
 m_left  ldd     #-1
-        bra     resel
+        bra     m_resel
 
 m_right ldd     #1
-        bra     resel
+        bra     m_resel
 
 m_up    ldd     #-16
-        bra     resel
+        bra     m_resel
 
 m_down  ldd     #16
-        bra     resel
+        bra     m_resel
 
-resel   leas    -3,s
+m_resel leas    -3,s
         std     0,s             ; Save offset
         lda     bank_hi         ; Save old bank_hi
         sta     2,s
@@ -161,20 +163,20 @@ mdraw   jsr     clrscn          ; Clear screen
 
 view    ldd     #v_keys
         std     keymap
-        clr     addr
-        clr     addr+1
         jmp     vdraw
 
 v_next  ldd     #128
-        bra     v_resel
+        jsr     resel
+        lbra    vdraw
                       
 v_prev  ldd     #-128
-        bra     v_resel
+        jsr     resel
+        lbra    vdraw
                       
-v_resel addd    addr
+resel   addd    addr
         std     addr
         bpl     1f
-        anda    #$10        ; Underflowed - decrement bank
+        lda     #$0f        ; Underflowed - decrement bank
         sta     addr
         ldd     #-1
         bra     2f
@@ -187,7 +189,7 @@ v_resel addd    addr
         adca    bank_hi
         sta     bank_hi
         stb     bank_lo
-3       jmp     vdraw
+3       rts
                       
 vdraw   jsr     clrscn
         ldx     #view_menu
@@ -207,6 +209,37 @@ vdraw   jsr     clrscn
         cmpy    #textend
         blo     1b
         rts
+
+amode   ldd     #a_keys
+        std     keymap
+        clr     addr+1
+        ; fall through
+
+adraw   jsr     clrscn
+        ldx     #view_menu
+        jsr     draw
+        jsr     drawbnk
+        jsr     drawadr
+        ldx     addr            ; Draw hex bytes
+        leax    rom,x
+        ldy     #text
+1       lda     ,x+
+        sta     ,y+
+        tfr     x,d             ; Have we reached the 16th byte?
+        andb    #$f              
+        bne     1b
+        leay    16,y             ; Move to next line
+        cmpy    #textend
+        blo     1b
+        rts
+
+a_next  ldd     #256
+        jsr     resel
+        lbra    adraw
+                      
+a_prev  ldd     #-256
+        jsr     resel
+        lbra    adraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 exit    jsr     clrscn
@@ -292,12 +325,21 @@ m_keys  kmap    'P',    m_prev
         kmap    kup,    m_up
         kmap    kdown,  m_down
         kmap    'V',    view
+        kmap    'A',    amode
         kmap    'X',    exit
         fcb     0
 
 v_keys  kmap    'P',    v_prev 
         kmap    'N',    v_next
         kmap    'M',    map
+        kmap    'A',    amode
+        kmap    'X',    exit
+        fcb     0
+
+a_keys  kmap    'P',    a_prev 
+        kmap    'N',    a_next
+        kmap    'M',    map
+        kmap    'V',    view
         kmap    'X',    exit
         fcb     0
 
