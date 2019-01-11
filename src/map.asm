@@ -32,7 +32,7 @@ blklen  equ     $7d
 config  equ     $ff64
 bank_lo equ     config+1
 bank_hi equ     config+2
-FCNTRL  equ     config
+fcntrl  equ     config
 rom_en  equ     $ffde 
 ram_en  equ     $ffdf
 mpak    equ     $ff7f
@@ -242,6 +242,57 @@ a_prev  ldd     #-256
         lbra    adraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+emode   jsr     clrscn
+        ldx     #etext
+        jsr     draw
+        jsr     ebound
+        pshs    y
+        tfr     x,d
+        ldy     #e1pos
+        jsr     drawwrd
+        puls    d
+        ldy     #e2pos
+        jsr     drawwrd
+1       jsr     [polcat]
+        cmpa    #'N'
+        beq     9f
+        cmpa    #'Y'
+        bne     1b
+        jsr     erase
+9       jmp     mdraw
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Computes boundary of bank erasure
+;
+; Inputs:
+;   bank_lo, bank_hi - Bank to erase
+;
+; Outputs:
+;   X = first bank erased
+;   Y = last bank erased
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ebound  lda     bank_hi
+        ldb     bank_lo
+        addd    #4              ; Convert to physical bank
+        anda    #7              ; handle wraparound
+        cmpd    #32
+        bhs     1f
+        andb    #~1             ; 2 banks/sec
+        subd    #4              ; Back to logical
+        anda    #7              ; handle wraparound
+        tfr     d,x
+        addd    #1
+        tfr     d,y
+        rts
+1       andb    #~7
+        subd    #4              ; Back to logical
+        anda    #7              ; handle wraparound
+        tfr     d,x
+        addd    #7              ; 8 banks/sec
+        tfr     d,y
+        rts
+        
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 exit    jsr     clrscn
         leas    2,s             ; Unwind the stack
         rts
@@ -310,6 +361,35 @@ drawnyb anda    #$0f
         rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Erase bank
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+erase   pshs    cc
+        orcc    #$50    ; Disable interrupts
+        ;sta    $ffde   ; Enable rom in memory map
+        lda     #$81    ; Set bits for led on and write enable
+        sta     fcntrl  ; Send to flash card control register
+        lbsr    preamb  ; Send erase instruction
+        lda     #$80
+        sta     $caaa
+        lbsr    preamb
+        lda     #$30
+        sta     $c000
+chkera  lda     $c000   ; Get a test data byte
+        cmpa    #$ff    ; Is it erased?
+        bne     chkera  ; No, wait
+        ;sta    $ffdf   ; Disable rom in memory map
+        puls    cc      ; Restore interrupt status
+        clra
+        sta     fcntrl  ; Turn off write access and led
+        rts
+
+preamb  lda        #$aa
+        sta        $caaa
+        lda        #$55
+        sta        $c555
+        rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Tables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -326,6 +406,7 @@ m_keys  kmap    'P',    m_prev
         kmap    kdown,  m_down
         kmap    'H',    view
         kmap    'A',    amode
+        kmap    'E',    emode
         kmap    'X',    exit
         fcb     0
 
@@ -382,6 +463,15 @@ a_menu
         stext   10,24,"(P)REV"
         stext   11,24,"E(X)IT"
         fdb     $ffff
+
+etext
+        stext   4,4,    " WILL ERASE BANKS"
+        stext   5,4,    "  XXXX TO YYYY"
+        stext   6,4,    "ARE YOU SURE (Y/N)"
+        fdb     $ffff
+
+e1pos   equ     text+5*32+6
+e2pos   equ     e1pos+8
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Global variables
