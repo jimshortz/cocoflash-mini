@@ -72,6 +72,11 @@ drawbnk ldy     #bnkpos
         ldb     bank_lo
         jmp     drawwrd
 
+drawbnk2 ldy     #bnkpos2
+        lda     bank_hi
+        ldb     bank_lo
+        jmp     drawwrd
+
 drawadr ldy     #addrpos
         ldd     addr
         jmp     drawwrd
@@ -100,48 +105,57 @@ m_up    ldd     #-16
 m_down  ldd     #16
         bra     m_resel
 
-m_resel leas    -3,s
-        std     0,s             ; Save offset
-        lda     bank_hi         ; Save old bank_hi
-        sta     2,s
-        jsr     xorsel
-        ldd     0,s             ; Load offset
+m_resel pshs    d
+        jsr     xorsel          ; Clear existing selection
+        puls    d
         addb    bank_lo         ; Adjust selected bank
         adca    bank_hi
         sta     bank_hi
         stb     bank_lo
-        cmpa    2,s             ; Compare to old bank_hi
-        leas    3,s
-        lbne    mdraw           ; bank_hi changed - redraw whole screen
-        jsr     drawbnk         ; Update bank number
-        lbra    xorsel          ; Hilight new bank
+        jsr     xorsel          ; Attempt to update selection
+        bne     mdraw           ; Went off page - redraw
+        lbra    drawbnk         ; Update bank number
         
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-xorsel  clra                    ; Convert bank_lo to screen address
-        ldb     bank_lo         ; Column = low nibble of bank_lo
-        andb    #$0f
-        pshs    b
-        ldb     bank_lo         ; Row = high nibble of bank_lo
-        andb    #$f0
+xorsel  leas    -2,s
+        lda     bank_hi         ; Compute relative bank #
+        ldb     bank_lo
+        subb    #$fc
+        sbca    page
+        anda    #7              ; Wrap around
+        bne     1f              ; If relative bank >= $100 - bail
+        stb     0,s
+        andb    #$0f            ; column
+        stb     -1,s
+        ldb     0,s
+        andb    #$f0            ; row*16
         lslb                    ; row*32
         rola
-        orb     0,s             ; Add in row
+        orb     -1,s            ; +column
         ldx     #text
         leax    d,x
         lda     ,x
         eora    #$40            ; XOR background bits at screen address
         sta     ,x
-        puls    b
+        clra                    ; return OK
+1       leas    2,s
         rts
-        
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 mdraw   jsr     clrscn          ; Clear screen
         ldx     #map_menu       ; Draw static text
         jsr     draw
         jsr     drawbnk         ; Draw bank number
-        ldb     bank_lo         ; Save selected bank
-        pshs    b
-        clr     bank_lo
+mdraw1  lda     bank_hi         ; Save selected bank
+        ldb     bank_lo
+        pshs    d
+        cmpb    #$fc            ; Compute page
+        bhs     4f
+        deca
+4       sta     page
+        ldb     #$fc
+        sta     bank_hi         ; Move to 1st bank in page
+        stb     bank_lo
         ldy     #text
 1       ldb     #'-'|$40
         jsr     is_free
@@ -149,13 +163,16 @@ mdraw   jsr     clrscn          ; Clear screen
         ldb     #'X'
 2       stb     ,y+
         inc     bank_lo
-        beq     3f
-        lda     bank_lo
-        anda    #$f             ; Have we reached the 16th bank?
+        bne     3f
+        inc     bank_hi
+3       tfr     y,d
+        andb    #$f             ; Have we reached the 16th bank?
         bne     1b
         leay    16,y            ; Move to the next line
-        bra     1b
-3       puls    b               ; Restore selected bank
+        cmpy    #textend
+        blo     1b
+3       puls    d               ; Restore selected bank
+        sta     bank_hi
         stb     bank_lo
         jmp     xorsel          ; Highlight it
 
@@ -243,23 +260,29 @@ a_prev  ldd     #-256
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 emode   jsr     clrscn
+        jsr     mdraw1      ; Redraw map screen minus stext
         ldx     #etext
         jsr     draw
-        jsr     ebound
-        pshs    y
-        tfr     x,d
-        ldy     #e1pos
-        jsr     drawwrd
-        puls    d
-        ldy     #e2pos
-        jsr     drawwrd
-1       jsr     [polcat]
-        cmpa    #'N'
-        beq     9f
-        cmpa    #'Y'
+        jsr     xorsel      ; Deselect
+        jsr     ebound      ; Compute bounds of erasure
+        jsr     drawbnk     ; Draw starting bank #
+1       pshs    x           ; Highlight banks to erase
+        jsr     xorsel
+        puls    x
+        leax    -1,x
+        beq     2f
+        inc     bank_lo
         bne     1b
+        inc     bank_hi
+        bra     1b
+2       jsr     drawbnk2    ; Draw ending bank #
+3       jsr     [polcat]
+        cmpa    #'N'
+        beq     4f
+        cmpa    #'Y'
+        bne     3b
         jsr     erase
-9       jmp     mdraw
+4       lbra    mdraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Computes boundary of bank erasure
@@ -268,8 +291,8 @@ emode   jsr     clrscn
 ;   bank_lo, bank_hi - Bank to erase
 ;
 ; Outputs:
-;   X = first bank erased
-;   Y = last bank erased
+;   bank_lo, bank_hi - First bank to erase
+;   X - number of banks
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ebound  lda     bank_hi
         ldb     bank_lo
@@ -278,18 +301,14 @@ ebound  lda     bank_hi
         cmpd    #32
         bhs     1f
         andb    #~1             ; 2 banks/sec
-        subd    #4              ; Back to logical
+        ldx     #2              ; Erase 2 banks
+        bra     2f
+1       andb    #~15
+        ldx     #16             ; Bank count
+2       subd    #4              ; Back to logical
         anda    #7              ; handle wraparound
-        tfr     d,x
-        addd    #1
-        tfr     d,y
-        rts
-1       andb    #~7
-        subd    #4              ; Back to logical
-        anda    #7              ; handle wraparound
-        tfr     d,x
-        addd    #7              ; 8 banks/sec
-        tfr     d,y
+        sta     bank_hi         ; move to starting bank
+        stb     bank_lo
         rts
         
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -429,45 +448,50 @@ stext   macro
         fcn     \3
         endm
 
-bnkpos  equ     text+32*1+26
-addrpos equ     text+32*4+26
-
 map_menu
-        stext   0,26,   "BANK"
-        stext   6,24, "(E)RASE"
-        stext   7,24, "(H)EX"
-        stext   8,24, "(A)SCII"
-        stext   9,24, "(N)EXT"
-        stext   10,24,"(P)REV"
-        stext   11,24,"E(X)IT"
+        stext   0,24,   "BANK"
+        stext   6,24,   "(E)RASE"
+        stext   7,24,   "(H)EX"
+        stext   8,24,   "(A)SCII"
+        stext   9,24,   "(N)EXT"
+        stext   10,24,  "(P)REV"
+        stext   11,24,  "E(X)IT"
         fdb     $ffff
 
+bnkpos  equ     text+32*1+24
+bnkpos2 equ     text+32*3+24
+addrpos equ     text+32*4+24
+
 v_menu
-        stext   0,26,    "BANK"
-        stext   3,26,    "ADDR"
-        stext   6,24, "(E)RASE"
-        stext   7,24, "(M)AP"
-        stext   8,24, "(A)SCII"
-        stext   9,24,"(N)EXT"
-        stext   10,24,"(P)REV"
-        stext   11,24,"E(X)IT"
+        stext   0,24,   "BANK"
+        stext   3,24,   "ADDR"
+        stext   6,24,   "(E)RASE"
+        stext   7,24,   "(M)AP"
+        stext   8,24,   "(A)SCII"
+        stext   9,24,   "(N)EXT"
+        stext   10,24,  "(P)REV"
+        stext   11,24,  "E(X)IT"
         fdb     $ffff
 
 a_menu
-        stext   0,26,    "BANK"
-        stext   3,26,    "ADDR"
-        stext   6,24, "(E)RASE"
-        stext   7,24, "(M)AP"
-        stext   8,24, "(H)EX"
-        stext   9,24, "(N)EXT"
-        stext   10,24,"(P)REV"
-        stext   11,24,"E(X)IT"
+        stext   0,26,   "BANK"
+        stext   3,26,   "ADDR"
+        stext   6,24,   "(E)RASE"
+        stext   7,24,   "(M)AP"
+        stext   8,24,   "(H)EX"
+        stext   9,24,   "(N)EXT"
+        stext   10,24,  "(P)REV"
+        stext   11,24,  "E(X)IT"
         fdb     $ffff
 
 etext
-        stext   4,4,    " WILL ERASE BANKS"
-        stext   5,4,    "  XXXX TO YYYY"
-        stext   6,4,    "ARE YOU SURE (Y/N)"
+        stext   0,24,   "BANK"
+        stext   2,24,   " TO"
+        stext   6,22,   "ERASE ALL"
+        stext   7,22,   "SELECTED"
+        stext   8,22,   "BANKS?"
+        stext   10,22,  "(Y)ES"
+        stext   11,22,  "(N)O"
         fdb     $ffff
 
 e1pos   equ     text+5*32+6
@@ -476,6 +500,7 @@ e2pos   equ     e1pos+8
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Global variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+page    fcc     0
 addr    fdb     0       ; Address within bank to show (view mode)
 keymap  fdb     m_keys
 
