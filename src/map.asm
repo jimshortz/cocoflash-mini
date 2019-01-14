@@ -1,14 +1,30 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; CocoFlash programming software
+; CocoFlash ROM Mapper
 ;
 ;-----------------------------------------------------------------------
 ;
 ; Author:       Jim Shortz
-; Date:         June 29, 2017
+; Date:         January 12, 2019
 ;
 ; Target:       Radio Shack Color Computer
 ; Assembler:    asm6809 cross assembler
 ;
+;-----------------------------------------------------------------------
+; This program is used to view and manage ROM banks for a CocoFlash
+; card.  It runs on any CoCo and requires 2KB of RAM.
+;
+; The program has 5 distinct modes:
+;  Map -    Shows a map of ROM banks and free/used status.
+;  Hex -    Shows contents of a bank in hex.
+;  ASCII -  Shows contents of a bank in ASCII.
+;  Erase -  Erases a sector
+;
+; Routines for each mode are prefixed with a single character
+; (m, h, a, e) to indicate the mode.  A mode is entered by calling
+; its *mode routine.
+;
+; The main loop of the program is a keyboard dispatcher that calls
+; subroutines listed in a mode-specific key table.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         org     $800
         setdp   0
@@ -24,10 +40,6 @@ blkout  equ     $a008
 joyin   equ     $a00a
 wrtldr  equ     $a00c
 
-cbufad  equ     $7e
-blktyp  equ     $7c
-blklen  equ     $7d
-
 ; Hardware registers
 config  equ     $ff64
 bank_lo equ     config+1
@@ -39,9 +51,13 @@ mpak    equ     $ff7f
 reset   equ     $fffe
 
 ; Memory locations
+cbufad  equ     $7e
+blktyp  equ     $7c
+blklen  equ     $7d
 text    equ     $0400           ; Text screen
 textend equ     text+16*32
 rom     equ     $c000
+romend  equ     $d000
 
 ; Key codes
 kdown   equ     $0a
@@ -50,74 +66,138 @@ kleft   equ     $08
 kright  equ     $09
 kent    equ     $0d
 
+prime   equ     139             ; Sampling interval for blank check
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Entry point
+; Clears to bank 0 and enters map mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 main    clr     bank_lo
         clr     bank_hi
-        jsr     map
-loop    jsr     [polcat]        ; Read keyboard and dispatch
-        beq     loop
+        jsr     mmode
+1       jsr     [polcat]        ; Read keyboard and dispatch
+        beq     1b
         ldx     keymap
-1       cmpa    ,x+
-        bne     2f              ; Not a match
+2       cmpa    ,x+
+        bne     3f              ; Not a match
         ldx     ,x              ; Get target address
         jsr     ,x              ; JSR to it
-        bra     loop
+        bra     1b
 
-2       leax    2,x             ; Next entry
+3       leax    2,x             ; Next entry
         ldb     ,x
-        bne     1b
-        bra     loop
+        bne     2b
+        bra     3b
 
-drawbnk ldy     #bnkpos
-        lda     bank_hi
-        ldb     bank_lo
-        jmp     drawwrd
-
-drawbnk2 ldy     #bnkpos2
-        lda     bank_hi
-        ldb     bank_lo
-        jmp     drawwrd
-
-drawadr ldy     #addrpos
-        ldd     addr
-        jmp     drawwrd
-
-map     ldd     #m_keys
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Enters map mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+mmode   ldd     #mkeys          ; Assign keymap
         std     keymap
-        clr     addr
-        clr     addr+1
-        jmp     mdraw
+        clr     addr            ; Reset addr to 0 for next time 
+        clr     addr+1          ; hex or ascii mode is entered
+        jmp     mdraw           ; Draw the map
 
-m_prev  ldd     #-256
-        bra     m_resel
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Map mode draw routine
+;
+; Draws free/busy map on left half of the screen.  256 banks.
+; Starts at $07FC because this is the first physical bank of the
+; ROM and is the boundary used during erasure.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+mdraw   jsr     clrscn          ; Clear screen
+        ldx     #mmenu          ; Draw static text
+        jsr     draw
+        jsr     drawbnk         ; Draw bank number
+        jsr     drawmap         ; Call helper
+        jmp     mxorsel         ; Highlight it
 
-m_next  ldd     #256
-        bra     m_resel
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Core map drawing routine used by both map and erase mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+drawmap lda     bank_hi         ; Save selected bank
+        ldb     bank_lo
+        pshs    d
+        cmpb    #$fc            ; Compute starting bank of screen
+        bhs     1f              ; All but the 1st 4 banks are
+        deca                    ; on the previous page
+1       sta     page
+        ldb     #$fc
+        sta     bank_hi         ; Move to 1st bank in page
+        stb     bank_lo
+        ldy     #text
+2       ldb     #'-'|$40        ; Empty bank symbol
+        jsr     is_free
+        beq     3f
+        ldb     #'X'            ; Change to full bank
+3       stb     ,y+             ; Draw it
+        inc     bank_lo         ; Advance to next bank
+        bne     4f
+        inc     bank_hi
+4       tfr     y,d
+        andb    #$f             ; Have we reached the 16th bank?
+        bne     2b
+        leay    16,y            ; Move to the next line
+        cmpy    #textend
+        blo     2b
+        puls    d               ; Restore selected bank
+        sta     bank_hi
+        stb     bank_lo
+        rts
 
-m_left  ldd     #-1
-        bra     m_resel
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Map mode navigation routines
+; These choose an offset to apply and call mnav to do the work.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-m_right ldd     #1
-        bra     m_resel
+mprev   ldd     #-256
+        bra     mnav
 
-m_up    ldd     #-16
-        bra     m_resel
+mnext   ldd     #256
+        bra     mnav
 
-m_down  ldd     #16
-        bra     m_resel
+mleft   ldd     #-1
+        bra     mnav
 
-m_resel pshs    d
-        jsr     xorsel          ; Clear existing selection
+mright  ldd     #1
+        bra     mnav
+
+mup     ldd     #-16
+        bra     mnav
+
+mdown   ldd     #16
+        bra     mnav
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Map mode central navigation routine.
+;
+; Inputs:
+;   D - Offset to apply
+;   bank_lo, bank_hi - Currently selected bank
+; Outputs:
+;   bank_lo, bank_hi - Newly selected bank
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+mnav    pshs    d
+        jsr     mxorsel         ; Clear existing selection
         puls    d
         addb    bank_lo         ; Adjust selected bank
         adca    bank_hi
         sta     bank_hi
         stb     bank_lo
-        jsr     xorsel          ; Attempt to update selection
-        bne     mdraw           ; Went off page - redraw
+        jsr     mxorsel         ; Attempt to update selection
+        lbne    mdraw           ; Went off page - redraw
         lbra    drawbnk         ; Update bank number
         
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-xorsel  leas    -2,s
+; Map mode select/deselect routine
+;
+; Inputs:
+;   bank_lo, bank_hi - Bank to select
+; Outputs:
+;   Z = 0   Bank selected
+;   Z = 1   Selected bank off screen
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+mxorsel leas    -2,s
         lda     bank_hi         ; Compute relative bank #
         ldb     bank_lo
         subb    #$fc
@@ -141,56 +221,62 @@ xorsel  leas    -2,s
 1       leas    2,s
         rts
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-mdraw   jsr     clrscn          ; Clear screen
-        ldx     #map_menu       ; Draw static text
+; Hex mode entry routine
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+hmode   ldd     #hkeys
+        std     keymap
+        ; Fall through
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Hex mode draw routine
+;
+; Draws 128 bytes of hex on the left 2/3 of the screen
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+hdraw   jsr     clrscn
+        ldx     #hmenu          ; Draw menu
         jsr     draw
-        jsr     drawbnk         ; Draw bank number
-mdraw1  lda     bank_hi         ; Save selected bank
-        ldb     bank_lo
-        pshs    d
-        cmpb    #$fc            ; Compute page
-        bhs     4f
-        deca
-4       sta     page
-        ldb     #$fc
-        sta     bank_hi         ; Move to 1st bank in page
-        stb     bank_lo
+        jsr     drawbnk         ; Draw bank #
+        jsr     drawadr         ; Draw address
+        ldx     addr            ; Draw hex bytes
+        leax    rom,x
         ldy     #text
-1       ldb     #'-'|$40
-        jsr     is_free
-        beq     2f
-        ldb     #'X'
-2       stb     ,y+
-        inc     bank_lo
-        bne     3f
-        inc     bank_hi
-3       tfr     y,d
-        andb    #$f             ; Have we reached the 16th bank?
+1       lda     ,x+
+        jsr     drawbyt
+        leay    1,y             ; Space
+        tfr     x,d             ; Have we reached the 8th byte?
+        andb    #7              
         bne     1b
-        leay    16,y            ; Move to the next line
+        leay    8,y             ; Move to next line
         cmpy    #textend
         blo     1b
-3       puls    d               ; Restore selected bank
-        sta     bank_hi
-        stb     bank_lo
-        jmp     xorsel          ; Highlight it
+        rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-view    ldd     #v_keys
-        std     keymap
-        jmp     vdraw
-
-v_next  ldd     #128
-        jsr     resel
-        lbra    vdraw
+; Hex mode navigation routines
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+hnext   ldd     #128
+        jsr     hnav
+        lbra    hdraw
                       
-v_prev  ldd     #-128
-        jsr     resel
-        lbra    vdraw
-                      
-resel   addd    addr
+hprev   ldd     #-128
+        jsr     hnav
+        lbra    hdraw
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;                      
+; Hex mode central navigation routine
+;
+; Inputs:
+;   bank_lo, bank_hi - Current bank
+;   addr - Current address within bank
+;   D - offset to apply
+;
+; Outputs:
+;   bank_lo, bank_hi - New bank to view
+;   addr - New address within bank
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;                      
+hnav    addd    addr
         std     addr
         bpl     1f
         lda     #$0f        ; Underflowed - decrement bank
@@ -208,36 +294,25 @@ resel   addd    addr
         stb     bank_lo
 3       rts
                       
-vdraw   jsr     clrscn
-        ldx     #v_menu
-        jsr     draw
-        jsr     drawbnk
-        jsr     drawadr
-        ldx     addr            ; Draw hex bytes
-        leax    rom,x
-        ldy     #text
-1       lda     ,x+
-        jsr     drawbyt
-        leay    1,y             ; Space
-        tfr     x,d             ; Have we reached the 8th byte?
-        andb    #7              
-        bne     1b
-        leay    8,y             ; Move to next line
-        cmpy    #textend
-        blo     1b
-        rts
-
-amode   ldd     #a_keys
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Enters ASCII mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+amode   ldd     #akeys
         std     keymap
-        clr     addr+1
+        clr     addr+1      ; Always view on 256 byte boundaries
         ; fall through
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; ASCII mode draw routine
+;
+; Draws 256 bytes of chars on the left 1/2 of the screen
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 adraw   jsr     clrscn
-        ldx     #a_menu
+        ldx     #amenu
         jsr     draw
         jsr     drawbnk
         jsr     drawadr
-        ldx     addr            ; Draw hex bytes
+        ldx     addr            ; Draw ascii bytes
         leax    rom,x
         ldy     #text
 1       lda     ,x+
@@ -245,29 +320,35 @@ adraw   jsr     clrscn
         tfr     x,d             ; Have we reached the 16th byte?
         andb    #$f              
         bne     1b
-        leay    16,y             ; Move to next line
+        leay    16,y            ; Move to next line
         cmpy    #textend
         blo     1b
         rts
 
-a_next  ldd     #256
-        jsr     resel
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; ASCII mode navigaton routines
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+anext   ldd     #256
+        jsr     hnav
         lbra    adraw
                       
-a_prev  ldd     #-256
-        jsr     resel
+aprev   ldd     #-256
+        jsr     hnav
         lbra    adraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-emode   jsr     clrscn
-        jsr     mdraw1      ; Redraw map screen minus stext
-        ldx     #etext
+; Erase mode entry routine
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+emode   ldx     #ekeys
+        stx     keymap
+        jsr     clrscn
+        jsr     drawmap     ; Redraw map screen minus stext
+        ldx     #emenu      ; Draw static text
         jsr     draw
-        jsr     xorsel      ; Deselect
         jsr     ebound      ; Compute bounds of erasure
         jsr     drawbnk     ; Draw starting bank #
 1       pshs    x           ; Highlight banks to erase
-        jsr     xorsel
+        jsr     mxorsel
         puls    x
         leax    -1,x
         beq     2f
@@ -276,13 +357,13 @@ emode   jsr     clrscn
         inc     bank_hi
         bra     1b
 2       jsr     drawbnk2    ; Draw ending bank #
-3       jsr     [polcat]
-        cmpa    #'N'
-        beq     4f
-        cmpa    #'Y'
-        bne     3b
-        jsr     erase
-4       lbra    mdraw
+        rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Does the actual erase and switches back to map mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+doerase jsr     erase
+        lbra    mmode
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Computes boundary of bank erasure
@@ -310,36 +391,48 @@ ebound  lda     bank_hi
         sta     bank_hi         ; move to starting bank
         stb     bank_lo
         rts
-        
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;        
+; Common routines
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;        
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Leaves the program
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 exit    jsr     clrscn
         leas    2,s             ; Unwind the stack
         rts
         
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-is_free
-; x=bank to check
+; Test emptiness of bank.
+;
+; NOTE - Doesn't check every location.  Use a smaller version of
+; prime to get more fidelty (at the expense of slower draw times)
+;
+; Inputs
+;   bank_lo, bank_hi - Bank to check
 ; Output
 ;  Z - set if bank is empty
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ldx     #$c000
+is_free
+        ldx     #rom
 1       lda     ,x
         coma
         bne     2f
-        leax    139,x           ; Sample the bank using a prime
-        cmpx    #$d000
+        leax    prime,x         ; Sample the bank using a prime
+        cmpx    #romend
         blo     1b
         clra
 2       rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-clrscn  
 ; Clears the screen
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+clrscn  
         ldx     #text
         lda     #$60
 1       sta     ,x+
-        cmpx    #text+$200
+        cmpx    #textend
         bne     1b
         rts
 
@@ -347,22 +440,58 @@ clrscn
 ; Draws static text
 ; X - pointer to text block (as established by stext macro)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        
-draw
-        ldy     ,x++
-        cmpy    #$ffff
-        beq     9f
+draw    ldy     ,x++
+        cmpy    #$ffff          ; Reached the end?
+        beq     2f
         leay    text,y
 1       lda     ,x+
         beq     draw
         ora     #$40
         sta     ,y+
         bra     1b
-9       rts
+2       rts
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Draw bank number on the screen
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+drawbnk ldy     #bnkpos
+        lda     bank_hi
+        ldb     bank_lo
+        jmp     drawwrd
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Draw ending bank number on the screen (erase mode)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+drawbnk2 ldy     #bnkpos2
+        lda     bank_hi
+        ldb     bank_lo
+        jmp     drawwrd
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Draw address on screen (hex, ascii modes)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+drawadr ldy     #addrpos
+        ldd     addr
+        jmp     drawwrd
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Draw a word (2 bytes) on the screen in hex
+;
+; Inputs:
+;   D - Word to draw
+;   Y - Location to draw to
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 drawwrd bsr     drawbyt
         exg     a,b
+        ; Fall through to drawbyt
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Draw a byte on the screen in hex
+;
+; Inputs:
+;   A - Byte to draw
+;   Y - Location to draw to
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 drawbyt pshs    a
         lsra
         lsra
@@ -370,6 +499,15 @@ drawbyt pshs    a
         lsra
         bsr     drawnyb
         puls    a
+        ; Fall through to drawnyb
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Draw a nybble on the screen in hex
+;
+; Inputs:
+;   A - Nybble to draw (lo)
+;   Y - Location to draw to
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 drawnyb anda    #$0f
         cmpa    #10
         bge     1f
@@ -380,7 +518,10 @@ drawnyb anda    #$0f
         rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Erase bank
+; Erase ROM bank
+;
+; Inputs
+;   bank_lo, bank_hi - Bank to erase
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 erase   pshs    cc
         orcc    #$50    ; Disable interrupts
@@ -402,6 +543,9 @@ chkera  lda     $c000   ; Get a test data byte
         sta     fcntrl  ; Turn off write access and led
         rts
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Write AA 55 to ROM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 preamb  lda        #$aa
         sta        $caaa
         lda        #$55
@@ -412,43 +556,64 @@ preamb  lda        #$aa
 ; Tables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; Defines a keymap entry
 kmap    macro
         fcb     \1
         fdb     \2
         endm
-
-m_keys  kmap    'P',    m_prev 
-        kmap    'N',    m_next
-        kmap    kleft,  m_left
-        kmap    kright, m_right
-        kmap    kup,    m_up
-        kmap    kdown,  m_down
-        kmap    'H',    view
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Mappings for map mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+mkeys   kmap    'P',    mprev 
+        kmap    'N',    mnext
+        kmap    kleft,  mleft
+        kmap    kright, mright
+        kmap    kup,    mup
+        kmap    kdown,  mdown
+        kmap    'H',    hmode
         kmap    'A',    amode
         kmap    'E',    emode
         kmap    'X',    exit
         fcb     0
 
-v_keys  kmap    'P',    v_prev 
-        kmap    'N',    v_next
-        kmap    'M',    map
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Mappings for hex mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+hkeys   kmap    'P',    hprev 
+        kmap    kleft,  hprev
+        kmap    'N',    hnext
+        kmap    kright, hnext
+        kmap    'M',    mmode
         kmap    'A',    amode
         kmap    'X',    exit
         fcb     0
 
-a_keys  kmap    'P',    a_prev 
-        kmap    'N',    a_next
-        kmap    'M',    map
-        kmap    'H',    view
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Mappings for ascii mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+akeys   kmap    'P',    aprev 
+        kmap    kleft,  aprev
+        kmap    'N',    anext
+        kmap    kright, anext
+        kmap    'M',    mmode
+        kmap    'H',    hmode
         kmap    'X',    exit
         fcb     0
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Mappings for erase mode
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ekeys   kmap    'N',    mmode 
+        kmap    'Y',    doerase
+        fcb     0
+
+; Defines static text (row, column, text)
 stext   macro
         fdb     \1*32+\2
         fcn     \3
         endm
 
-map_menu
+mmenu
         stext   0,24,   "BANK"
         stext   6,24,   "(E)RASE"
         stext   7,24,   "(H)EX"
@@ -456,13 +621,16 @@ map_menu
         stext   9,24,   "(N)EXT"
         stext   10,24,  "(P)REV"
         stext   11,24,  "E(X)IT"
+        stext   14,19,  "COCOMAP 0.9"
+        stext   15,18,  "BY JIM SHORTZ"
         fdb     $ffff
 
+; Screen positions for dynamic text
 bnkpos  equ     text+32*1+24
 bnkpos2 equ     text+32*3+24
 addrpos equ     text+32*4+24
 
-v_menu
+hmenu
         stext   0,24,   "BANK"
         stext   3,24,   "ADDR"
         stext   6,24,   "(E)RASE"
@@ -473,7 +641,7 @@ v_menu
         stext   11,24,  "E(X)IT"
         fdb     $ffff
 
-a_menu
+amenu
         stext   0,26,   "BANK"
         stext   3,26,   "ADDR"
         stext   6,24,   "(E)RASE"
@@ -484,7 +652,7 @@ a_menu
         stext   11,24,  "E(X)IT"
         fdb     $ffff
 
-etext
+emenu
         stext   0,24,   "BANK"
         stext   2,24,   " TO"
         stext   6,22,   "ERASE ALL"
@@ -494,15 +662,11 @@ etext
         stext   11,22,  "(N)O"
         fdb     $ffff
 
-e1pos   equ     text+5*32+6
-e2pos   equ     e1pos+8
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Global variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-page    fcc     0
-addr    fdb     0       ; Address within bank to show (view mode)
-keymap  fdb     m_keys
+page    rmb     1       ; First bank displayed on map (hi byte only)
+addr    rmb     2       ; Address within bank to show (hex, ascii mode)
+keymap  rmb     2       ; Active key mapping table
 
-the_end
         end     main
