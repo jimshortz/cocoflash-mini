@@ -94,9 +94,12 @@ main    clr     bank_lo
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 mmode   ldd     #mkeys          ; Assign keymap
         std     keymap
+        jsr     clrscn          ; Clear screen
+        ldx     #mmenu          ; Draw static text
+        jsr     draw
         clr     addr            ; Reset addr to 0 for next time 
         clr     addr+1          ; hex or ascii mode is entered
-        jmp     mdraw           ; Draw the map
+        ; Fall through to mdraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Map mode draw routine
@@ -105,10 +108,7 @@ mmode   ldd     #mkeys          ; Assign keymap
 ; Starts at $07FC because this is the first physical bank of the
 ; ROM and is the boundary used during erasure.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-mdraw   jsr     clrscn          ; Clear screen
-        ldx     #mmenu          ; Draw static text
-        jsr     draw
-        jsr     drawbnk         ; Draw bank number
+mdraw   jsr     drawbnk         ; Draw bank number
         jsr     drawmap         ; Call helper
         jmp     mxorsel         ; Highlight it
 
@@ -227,17 +227,17 @@ mxorsel leas    -2,s
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 hmode   ldd     #hkeys
         std     keymap
-        ; Fall through
+        jsr     clrscn
+        ldx     #hmenu          ; Draw menu
+        jsr     draw
+        ; Fall through to hdraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Hex mode draw routine
 ;
 ; Draws 128 bytes of hex on the left 2/3 of the screen
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-hdraw   jsr     clrscn
-        ldx     #hmenu          ; Draw menu
-        jsr     draw
-        jsr     drawbnk         ; Draw bank #
+hdraw   jsr     drawbnk         ; Draw bank #
         jsr     drawadr         ; Draw address
         ldx     addr            ; Draw hex bytes
         leax    rom,x
@@ -299,18 +299,18 @@ hnav    addd    addr
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 amode   ldd     #akeys
         std     keymap
+        jsr     clrscn
+        ldx     #amenu      ; Draw menu
+        jsr     draw
         clr     addr+1      ; Always view on 256 byte boundaries
-        ; fall through
+        ; Fall through to adraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; ASCII mode draw routine
 ;
 ; Draws 256 bytes of chars on the left 1/2 of the screen
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-adraw   jsr     clrscn
-        ldx     #amenu
-        jsr     draw
-        jsr     drawbnk
+adraw   jsr     drawbnk
         jsr     drawadr
         ldx     addr            ; Draw ascii bytes
         leax    rom,x
@@ -342,7 +342,7 @@ aprev   ldd     #-256
 emode   ldx     #ekeys
         stx     keymap
         jsr     clrscn
-        jsr     drawmap     ; Redraw map screen minus stext
+        jsr     drawmap     ; Redraw bank map
         ldx     #emenu      ; Draw static text
         jsr     draw
         jsr     ebound      ; Compute bounds of erasure
@@ -368,25 +368,28 @@ doerase jsr     erase
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Computes boundary of bank erasure
 ;
+; Since the flash chip can only erase by sector, this routine computes
+; the full effect of erasing a bank.  The first 16 sectors are 8K
+; (2 banks/sector) the remaining ones are 64K (16 banks/sector)
+;
 ; Inputs:
 ;   bank_lo, bank_hi - Bank to erase
 ;
 ; Outputs:
 ;   bank_lo, bank_hi - First bank to erase
-;   X - number of banks
+;   X - number of banks to erase
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ebound  lda     bank_hi
         ldb     bank_lo
         addd    #4              ; Convert to physical bank
         anda    #7              ; handle wraparound
-        cmpd    #32
-        bhs     1f
-        andb    #~1             ; 2 banks/sec
+        andb    #~1             ; Snap to 2 bank boundary
         ldx     #2              ; Erase 2 banks
-        bra     2f
-1       andb    #~15
-        ldx     #16             ; Bank count
-2       subd    #4              ; Back to logical
+        cmpd    #32             ; Only first 32 use 2 banks/sector
+        blo     1f
+        andb    #~15            ; Snap to 16 bank boundary
+        ldx     #16             ; Erase 16 banks
+1       subd    #4              ; Back to logical bank
         anda    #7              ; handle wraparound
         sta     bank_hi         ; move to starting bank
         stb     bank_lo
