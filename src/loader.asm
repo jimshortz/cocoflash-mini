@@ -31,9 +31,11 @@ polcat  equ     $a000
 chrout  equ     $a002
 csrdon  equ     $a004
 blkin   equ     $a006
+prnum   equ     $bdcc
 
 ; Memory locations
 rstflg  equ     $71
+rstvec  equ     $72
 blktyp  equ     $7c
 blklen  equ     $7d
 cbufad  equ     $7e
@@ -43,27 +45,22 @@ casbuf  equ     $01da
 
 ; Hardware registers
 config  equ     $ff64
+fcntrl  equ     config
 bank_lo equ     config+1
 bank_hi equ     config+2
-FCNTRL  equ     config
-rom_en  equ     $ffde 
-ram_en  equ     $ffdf
-mpak    equ     $ff7f
-;reset   equ     $fffe
-pia1    equ     $ff21
-motor   equ     $08             ; Tape motor control bit (PIA1)
 
 hdrtyp  equ     3               ; Type of header block
-ssize   equ     64              ; Size of stack to allocate
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-main    lds     #stack+ssize-1  ; Move stack to low RAM
-        clr     rstflg          ; Reset button does cold start
-        clr     curpos+1        ; Return to home
+; Main routine
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+main    clr     curpos+1        ; Return to home
         ldx     #hello
 mloop   jsr     prstr
 
-mloop1  ldx     #wait
+mloop1  clr     bank_lo         ; Return to bank 0 (for reset)
+        clr     bank_hi
+        ldx     #wait
         jsr     prstr
 1       jsr     readhdr
         bne     1b              ; Silently retry to avoid noisy condition
@@ -75,22 +72,22 @@ mloop1  ldx     #wait
         lda     start_bank      ; Are we in erase mode?
         bpl     1f
         ldx     #ermsg          ; Change message if so
-1       jsr     reset
+1       jsr     first_kb
 2       jsr     bcheck          ; Check a 1KB block
         beq     3f              ; Skip if clean
         lda     start_bank      ; Are we in erase mode?
         bpl     abort
-        jsr     ERASE
+        jsr     erase
 3       jsr     next_kb
         bne     2b
         jsr     meter
 
         ; Download and program chunks
         ldx     #wrmsg
-        jsr     reset
+        jsr     first_kb
 1       jsr     read_kb         ; Read 1KB from the tape
         bne     abort
-        jsr     PGMBLK          ; Burn it to flash
+        jsr     pgmblk          ; Burn it to flash
         bne     abort
         jsr     next_kb
         bne     1b
@@ -132,6 +129,10 @@ readhdr jsr     [csrdon]        ; Turn on the tape
         cmpa    #buf-header
         bne     1f
 
+        clr     hdr_end         ; Null terminate fname
+        ldx     #fname          ; Print file name
+        jsr     prstr
+
         ldx     #bnkmsg         ; Print starting bank
         jsr     prstr
         ldd     start_bank
@@ -147,7 +148,8 @@ readhdr jsr     [csrdon]        ; Turn on the tape
 ; Outputs:
 ;   Z=1 If at end, Z=0 if more blocks remain
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
-reset   jsr     prstr               ; Print phase
+first_kb  
+        jsr     prstr               ; Print phase
         ldd     start_bank          ; Reset bank pointer
         anda    #$7                 ; Remove extra bits
         sta     bank_hi
@@ -176,8 +178,11 @@ next_kb ldx     target
         ldy     kb_cur          ; Increment kb_cur
         leay    1,y
         sty     kb_cur
-        ; Fall through
+        ; Fall through to meter
         
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
+; Displays progress of operations
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 
 meter   lda     curpos+1        ; Reset cursor to column 10
         anda    #$e0
         ora     #10
@@ -211,24 +216,22 @@ bcheck  ldx     target          ; Iterate from target to target+1KB
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Erase bank
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-ERASE   ORCC    #$50    ; Disable interrupts
-        ;STA    $FFDE   ; Enable ROM in memory map
-        LDA     #$81    ; Set bits for LED on and write enable
-        STA     FCNTRL  ; Send to flash card control register
-        LBSR    PREAMB  ; Send erase instruction
-        LDA     #$80
-        STA     $CAAA
-        LBSR    PREAMB
-        LDA     #$30
-        STA     $C000
-CHKERA  LDA     $C000   ; Get a test data byte
-        CMPA    #$FF    ; Is it erased?
-        BNE     CHKERA  ; No, wait
-        ;STA    $FFDF   ; Disable ROM in memory map
-        ANDCC   #$AF    ; Enable interrupts
-        CLRA
-        STA     FCNTRL  ; Turn off write access and LED
-        RTS
+erase   orcc    #$50    ; Disable interrupts
+        lda     #$81    ; Set bits for led on and write enable
+        sta     fcntrl  ; Send to flash card control register
+        lbsr    preamb  ; Send erase instruction
+        lda     #$80
+        sta     $caaa
+        lbsr    preamb
+        lda     #$30
+        sta     $c000
+chkera  lda     $c000   ; Get a test data byte
+        cmpa    #$ff    ; Is it erased?
+        bne     chkera  ; No, wait
+        andcc   #$af    ; Enable interrupts
+        clra
+        sta     fcntrl  ; Turn off write access and led
+        rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Reads a 1KB chunk from the tape
@@ -250,71 +253,70 @@ read_kb ldx     #buf            ; Reset cassette buffer to buf
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Writes 1KB of data from target -> ROM
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-PGMBLK  LDX         #buf
-        LDY         target
-        ORCC       #$50   ;Disable interrupts
-;        STA        $FFDE  ;Enable ROM in memory map
-        CLRB                ; Set error count = 0
-LOOP    CMPX       #bufend ;Have we finished a 1K chunk?
-        BEQ        EXIT   ;Yes, exit loop
-        INCB
-        CMPB       #$FF   ;Pass # 255?
-        BEQ        FAIL   ;Too many attempts, fail
-        LDA        #$81   ;Set bits for LED on and write enable
-        STA        FCNTRL ;Send to flash card control register
-        LBSR       PREAMB ; Set up write sequence
-        LDA        #$A0
-        STA        $CAAA
-        LDA        ,X     ; Get data to write to flash
-        STA        ,Y     ; Write to flash
-PPOLL   LDA        $C000  ; Poll the operation status
-        EORA       $C000
-        ANDA       #$40   ; Bits toggling?
-        BNE        PPOLL  ; Yes, keep polling
-        CLRA
-        STA        FCNTRL ; Turns off LED and disables write mode
-        PSHS       B
-        CLRB
-DELAY   NOP
-        INCB
-        CMPB       #100
-        BLE        DELAY
-        PULS       B
-        LDA        ,Y     ; Load data back
-        CMPA       ,X     ; Does it match?
-        BNE        RESET  ; Try again
-        CLRB                ; Clear error count
-        LEAX       1,X    ; Increment source address
-        LEAY       1,Y    ; Increment destination address
-        BRA        LOOP   ; Next byte
-RESET   LDA        #$F0   ; Reset command
-        STA        $C000  ; Send reset
-PPOLL2  LDA        $C000  ; Poll the operation status
-        EORA       $C000
-        ANDA       #$40   ; Bits toggling?
-        BNE        PPOLL2 ; Yes, keep polling
-        BRA        LOOP   ; Go try again
-;EXIT   STA        $FFDF  ; Disable ROM in memory map
-EXIT    ANDCC      #$AF   ; Enable interrupts
-        CLRA
-        STA        FCNTRL ; Turn off write access and LED
-        RTS
-;FAIL    STA        $FFDF       ; Disable ROM in memory map
-FAIL    ANDCC      #$AF         ; Enable interrupts
-        CLRA
-        STA     FCNTRL          ; Turn off write access and LED
-        STY     target          ; For debugging
-        RTS
+pgmblk  ldx         #buf
+        ldy         target
+        orcc       #$50   ;disable interrupts
+        clrb                ; set error count = 0
+loop    cmpx       #bufend ;have we finished a 1k chunk?
+        beq        exit   ;yes, exit loop
+        incb
+        cmpb       #$ff   ;pass # 255?
+        beq        fail   ;too many attempts, fail
+        lda        #$81   ;set bits for led on and write enable
+        sta        fcntrl ;send to flash card control register
+        lbsr       preamb ; set up write sequence
+        lda        #$a0
+        sta        $caaa
+        lda        ,x     ; get data to write to flash
+        sta        ,y     ; write to flash
+ppoll   lda        $c000  ; poll the operation status
+        eora       $c000
+        anda       #$40   ; bits toggling?
+        bne        ppoll  ; yes, keep polling
+        clra
+        sta        fcntrl ; turns off led and disables write mode
+        pshs       b
+        clrb
+delay   nop
+        incb
+        cmpb       #100
+        ble        delay
+        puls       b
+        lda        ,y     ; load data back
+        cmpa       ,x     ; does it match?
+        bne        reset  ; try again
+        clrb                ; clear error count
+        leax       1,x    ; increment source address
+        leay       1,y    ; increment destination address
+        bra        loop   ; next byte
+reset   lda        #$f0   ; reset command
+        sta        $c000  ; send reset
+ppoll2  lda        $c000  ; poll the operation status
+        eora       $c000
+        anda       #$40   ; bits toggling?
+        bne        ppoll2 ; yes, keep polling
+        bra        loop   ; go try again
+exit    andcc      #$af   ; enable interrupts
+        clra
+        sta        fcntrl ; turn off write access and led
+        rts
+fail    andcc      #$af         ; enable interrupts
+        clra
+        sta     fcntrl          ; turn off write access and led
+        sty     target          ; for debugging
+        rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Writes common "preamble" code to ROM (for both erase and program)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-PREAMB  LDA        #$AA
-        STA        $CAAA
-        LDA        #$55
-        STA        $C555
-        RTS
+preamb  lda        #$aa
+        sta        $caaa
+        lda        #$55
+        sta        $c555
+        rts
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Prints a string to the screen
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 prstr   lda ,x+
         beq 2f
@@ -323,14 +325,10 @@ prstr   lda ,x+
 2       rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-prnum   equ $bdcc
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Messages
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-wait    fcc 13,"RECEIVING",13,0
-bnkmsg  fcc    "BANK      ",0
+wait    fcc 13,"RECEIVING ",0
+bnkmsg  fcc 13,"BANK      ",0
 kbmsg   fcc " KB ",0
 bckmsg  fcc 13,"CHECKING",0
 ermsg   fcc 13,"ERASING",0
@@ -341,6 +339,12 @@ succ    fcc 13,"SUCCESS",13,0
 again   fcc 13,"ANY KEY TO RETRY",0
 hello   fcc "COCOFLASH MINI LOADER V0.9"
         fcc 13,"(C)2018 - JIM SHORTZ",13,0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Variables
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+kb_cur          rmb     2       ; Current 1KB block being processed
+target          rmb     2       ; Pointer to read/write
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Header block
@@ -361,13 +365,5 @@ hdr_end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 buf             rmb     1024
 bufend          
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Variables
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-    org casbuf
-stack           rmb     ssize   ; Replacement stack
-kb_cur          rmb     2       ; Current 1KB block being processed
-target          rmb     2       ; Pointer to read/write
 
         end     main
