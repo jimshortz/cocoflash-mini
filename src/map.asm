@@ -68,6 +68,10 @@ kent    equ     $0d
 
 prime   equ     139             ; Sampling interval for blank check
 
+    if  ROM
+        jmp     reloc,pcr
+    endif
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Entry point
 ; Clears to bank 0 and enters map mode
@@ -402,9 +406,17 @@ ebound  lda     bank_hi
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Leaves the program
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    if  ROM
+exit    clr     bank_lo         ; Switch back to bank 0
+        clr     bank_hi
+        lda     #2              ; And auto-start
+        sta     fcntrl
+        jmp     [reset]
+    else
 exit    jsr     clrscn
         leas    2,s             ; Unwind the stack
         rts
+    endif
         
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Test emptiness of bank.
@@ -671,5 +683,20 @@ emenu
 page    rmb     1       ; First bank displayed on map (hi byte only)
 addr    rmb     2       ; Address within bank to show (hex, ascii mode)
 keymap  rmb     2       ; Active key mapping table
+
+
+    if  ROM
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Relocate to RAM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+reloc   leax    main,pcr
+        ldy     #main
+1       lda     ,x+
+        sta     ,y+
+        cmpy    #reloc
+        blo     1b
+        jmp     main
+    endif
 
         end     main

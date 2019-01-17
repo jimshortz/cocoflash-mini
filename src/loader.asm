@@ -51,6 +51,10 @@ bank_hi equ     config+2
 
 hdrtyp  equ     3               ; Type of header block
 
+    if  ROM
+        jmp reloc,pcr
+    endif
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Main routine
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -58,9 +62,7 @@ main    clr     curpos+1        ; Return to home
         ldx     #hello
 mloop   jsr     prstr
 
-mloop1  clr     bank_lo         ; Return to bank 0 (for reset)
-        clr     bank_hi
-        ldx     #wait
+mloop1  ldx     #wait
         jsr     prstr
 1       jsr     readhdr
         bne     1b              ; Silently retry to avoid noisy condition
@@ -325,6 +327,19 @@ prstr   lda ,x+
 2       rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Warm start handler
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    if  ROM
+bye     nop
+        clr     rstvec
+        clr     bank_lo
+        clr     bank_hi
+        lda     #2
+        sta     config
+        jmp     [reset]
+    endif
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Messages
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 wait    fcc 13,"RECEIVING ",0
@@ -339,6 +354,25 @@ succ    fcc 13,"SUCCESS",13,0
 again   fcc 13,"ANY KEY TO RETRY",0
 hello   fcc "COCOFLASH MINI LOADER V0.9"
         fcc 13,"(C)2018 - JIM SHORTZ",13,0
+
+    if  ROM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Copy program from ROM to RAM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+reloc   leax    main,pcr
+        ldy     #main
+1       lda     ,x+
+        sta     ,y+
+        cmpy    #reloc
+        blo     1b
+
+        lda     #$55            ; Install reset handler
+        sta     rstflg
+        ldx     #bye
+        stx     rstvec
+
+        jmp     main            ; Transition to RAM
+    endif
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables

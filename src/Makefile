@@ -1,6 +1,6 @@
 CFLAGS=-Wall -g
 
-targets:        loader.wav rom2wav menu.bin makemenu
+targets:        rom2wav makemenu loader.wav map.wav loader.rom map.rom menu.bin
 
 rom2wav:	rom2wav.c
 	gcc $(CFLAGS) -o rom2wav rom2wav.c -lm
@@ -14,8 +14,14 @@ menu.bin:	menu.asm
 map.bin:	map.asm
 	asm6809 -C -o map.bin -l map.lst map.asm
 
+map.rom:	map.asm
+	asm6809 -dROM -o map.rom -l map.rom.lst map.asm
+
 loader.bin:	loader.asm
 	asm6809 -C -o loader.bin -l loader.lst loader.asm
+
+loader.rom:	loader.asm
+	asm6809 -dROM -o loader.rom -l loader.rom.lst loader.asm
 
 %.wav:	%.bin
 	makewav -n$< -c -r $< -o$@
