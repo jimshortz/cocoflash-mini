@@ -69,7 +69,7 @@ By default, programming will fail if any block of the target ROM is already in u
 Passing the `-e` option will cause the target blocks to be erased first.  *Use with caution*
 as this could cause neighboring ROMs to be erased as well due to idiosyncrasies of the 
 CocoFLASH ROM and banking structure.  Consult the CocoFLASH documentation for an explanation
-of this or simply always choose a starting bank of 28 plus a multiple of 32.
+of this or simply always choose a starting bank of 12 plus a multiple of 16.
 
 # Updating the menu
 

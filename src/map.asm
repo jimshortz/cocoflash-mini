@@ -389,7 +389,7 @@ ebound  lda     bank_hi
         anda    #7              ; handle wraparound
         andb    #~1             ; Snap to 2 bank boundary
         ldx     #2              ; Erase 2 banks
-        cmpd    #32             ; Only first 32 use 2 banks/sector
+        cmpd    #16             ; Only first 16 use 2 banks/sector
         blo     1f
         andb    #~15            ; Snap to 16 bank boundary
         ldx     #16             ; Erase 16 banks
