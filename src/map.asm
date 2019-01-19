@@ -80,18 +80,19 @@ main    clr     bank_lo
         clr     bank_hi
         jsr     mmode
 1       jsr     [polcat]        ; Read keyboard and dispatch
-        beq     1b
+        beq     1b              ; No key pressed
         ldx     keymap
-2       cmpa    ,x+
-        bne     3f              ; Not a match
-        ldx     ,x              ; Get target address
+2       ldb     ,x
+        beq     1b              ; No more entries to compare, try again
+        cmpa    ,x              ; Does it match?
+        beq     3f              
+        leax    3,x             ; Next entry
+        bra     2b
+
+3       ldx     1,x             ; Get target address
         jsr     ,x              ; JSR to it
         bra     1b
 
-3       leax    2,x             ; Next entry
-        ldb     ,x
-        bne     2b
-        bra     3b
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Enters map mode
@@ -243,11 +244,19 @@ hmode   ldd     #hkeys
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 hdraw   jsr     drawbnk         ; Draw bank #
         jsr     drawadr         ; Draw address
-        ldx     addr            ; Draw hex bytes
-        leax    rom,x
+        ldd     addr            ; Draw hex bytes
+        andb    #$80            ; Snap to half-page
+        tfr     d,x
         ldy     #text
-1       lda     ,x+
+1       lda     rom,x
         jsr     drawbyt
+        cmpx    addr            ; Is this the selection?
+        bne     2f
+        ldd     -2,y            ; Invert previous two bytes
+        eora    #$40
+        eorb    #$40
+        std     -2,y
+2       leax    1,x             ; Next byte
         leay    1,y             ; Space
         tfr     x,d             ; Have we reached the 8th byte?
         andb    #7              
@@ -261,11 +270,24 @@ hdraw   jsr     drawbnk         ; Draw bank #
 ; Hex mode navigation routines
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 hnext   ldd     #128
-        jsr     hnav
-        lbra    hdraw
+        bra     hcomm
                       
 hprev   ldd     #-128
-        jsr     hnav
+        bra     hcomm
+
+hup     ldd     #-8
+        bra     hcomm
+
+hdown   ldd     #8
+        bra     hcomm
+
+hleft   ldd     #-1
+        bra     hcomm
+
+hright  ldd     #1
+        ; fall through hcomm
+
+hcomm   jsr     hnav
         lbra    hdraw
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;                      
@@ -595,9 +617,11 @@ mkeys   kmap    'P',    mprev
 ; Mappings for hex mode
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 hkeys   kmap    'P',    hprev 
-        kmap    kleft,  hprev
         kmap    'N',    hnext
-        kmap    kright, hnext
+        kmap    kleft,  hleft
+        kmap    kright, hright
+        kmap    kup,    hup
+        kmap    kdown,  hdown
         kmap    'M',    mmode
         kmap    'A',    amode
         kmap    'X',    exit
