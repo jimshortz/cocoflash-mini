@@ -136,21 +136,20 @@ void open_outfile() {
 void close_outfile() {
 
     /* Write the WAVE header */
-    /* TODO - Fix endianness */
     int final_size = ftell(output);        
 
     strncpy(wav_header.id, "RIFF", 4);
     wav_header.chunk_size = LE_UINT32(final_size - 8);
     strncpy(wav_header.format, "WAVE", 4);
     strncpy(wav_header.sc1_id, "fmt ", 4);
-    wav_header.sc1_size = 16;
-    wav_header.audio_format = 1;
-    wav_header.num_channels = 1;
-    wav_header.sample_rate = sample_rate;
-    wav_header.block_align = 1;
-    wav_header.bits_per_sample = 8;
+    wav_header.sc1_size = LE_UINT32(16);
+    wav_header.audio_format = LE_UINT16(1);
+    wav_header.num_channels = LE_UINT16(1);
+    wav_header.sample_rate = LE_UINT32(sample_rate);
+    wav_header.block_align = LE_UINT16(1);
+    wav_header.bits_per_sample = LE_UINT16(8);
     strncpy(wav_header.sc2_id, "data", 4);
-    wav_header.sc2_size = final_size - sizeof(wav_header);
+    wav_header.sc2_size = LE_UINT32(final_size - sizeof(wav_header));
 
     fseek(output, 0, SEEK_SET);
     fwrite(&wav_header, 1, sizeof(wav_header), output);
