@@ -21,6 +21,7 @@
 #define PI 3.1415926
 #define BLOCK_SIZE 255
 #define BATCH_SIZE 1024
+#define BANNER_SIZE 44
 
 #define ERASE_SECS_PER_KB 0.03
 #define BCHECK_SECS_PER_KB 0.03
@@ -53,9 +54,9 @@ int             buffer_1200_length,
 
 /* Describes ROM to CoCo loader */
 struct {
-    char    banner[32];
     uint16  start_bank;
     uint16  kb_count;
+    char    fname[16];
 } pgm_header;
 
 /* WAVE file header */
@@ -135,21 +136,20 @@ void open_outfile() {
 void close_outfile() {
 
     /* Write the WAVE header */
-    /* TODO - Fix endianness */
     int final_size = ftell(output);        
 
     memcpy(wav_header.id, "RIFF", 4);
     wav_header.chunk_size = LE_UINT32(final_size - 8);
     memcpy(wav_header.format, "WAVE", 4);
     memcpy(wav_header.sc1_id, "fmt ", 4);
-    wav_header.sc1_size = 16;
-    wav_header.audio_format = 1;
-    wav_header.num_channels = 1;
-    wav_header.sample_rate = sample_rate;
-    wav_header.block_align = 1;
-    wav_header.bits_per_sample = 8;
+    wav_header.sc1_size = LE_UINT32(16);
+    wav_header.audio_format = LE_UINT16(1);
+    wav_header.num_channels = LE_UINT16(1);
+    wav_header.sample_rate = LE_UINT32(sample_rate);
+    wav_header.block_align = LE_UINT16(1);
+    wav_header.bits_per_sample = LE_UINT16(8);
     memcpy(wav_header.sc2_id, "data", 4);
-    wav_header.sc2_size = final_size - sizeof(wav_header);
+    wav_header.sc2_size = LE_UINT32(final_size - sizeof(wav_header));
 
     fseek(output, 0, SEEK_SET);
     fwrite(&wav_header, 1, sizeof(wav_header), output);
@@ -320,20 +320,18 @@ int main(int argc, char **argv)
     }
 
     /* Write some initial silence just to get everything going */
-    write_silence(1);
+    write_silence(0.25);
 
     /* Write header block */
-    char fmt[64];
-    sprintf(fmt, "  %-12.12s BANK=%-4d KB=%-4d", basename(in_filename),
-            start_bank, kb_count);
+    char fmt[18];
+    sprintf(fmt, "%-16.16s", basename(in_filename));
     strupr(fmt);
-    fmt[31] = erase ? 'E' : ' ';
-    memcpy(pgm_header.banner, fmt, 32); 
+    memcpy(pgm_header.fname, fmt, 16);
     pgm_header.start_bank = BE_UINT16(start_bank | (erase ? 0x8000 : 0));
     pgm_header.kb_count = BE_UINT16(kb_count);
 
     if (verbose) {
-        printf("Writing header: %-30s erase=%d\n", pgm_header.banner, erase);
+        printf("Writing header: start_bank=%d erase=%d fname=%s\n", start_bank, erase, fmt);
     }
 
     write_leader();
@@ -365,12 +363,13 @@ int main(int argc, char **argv)
             len -= block_len;
         }
 
+        /* EOF block */
+        write_block(0xff, NULL, 0);
+
         /* Write silence to give the CoCo time to do its work */
         write_silence(PGM_SECS_PER_KB);
     }
 
-    /* EOF block */
-    write_block(0xff, NULL, 0);
 
     fclose(input);
     close_outfile();
