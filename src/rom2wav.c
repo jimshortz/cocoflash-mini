@@ -37,8 +37,8 @@ void close_outfile();
 int             sample_rate;
 uint16          start_bank;
 uint16          kb_count;
-char            out_filename[MAXPATHLEN];
-char            in_filename[MAXPATHLEN];
+const char*     out_filename;
+const char*     in_filename;
 int             verbose;
 int             erase;
 FILE*           input;
@@ -138,17 +138,17 @@ void close_outfile() {
     /* TODO - Fix endianness */
     int final_size = ftell(output);        
 
-    strncpy(wav_header.id, "RIFF", 4);
+    memcpy(wav_header.id, "RIFF", 4);
     wav_header.chunk_size = LE_UINT32(final_size - 8);
-    strncpy(wav_header.format, "WAVE", 4);
-    strncpy(wav_header.sc1_id, "fmt ", 4);
+    memcpy(wav_header.format, "WAVE", 4);
+    memcpy(wav_header.sc1_id, "fmt ", 4);
     wav_header.sc1_size = 16;
     wav_header.audio_format = 1;
     wav_header.num_channels = 1;
     wav_header.sample_rate = sample_rate;
     wav_header.block_align = 1;
     wav_header.bits_per_sample = 8;
-    strncpy(wav_header.sc2_id, "data", 4);
+    memcpy(wav_header.sc2_id, "data", 4);
     wav_header.sc2_size = final_size - sizeof(wav_header);
 
     fseek(output, 0, SEEK_SET);
@@ -237,7 +237,7 @@ void parse_args(int argc, char** argv) {
                 sample_rate = strtol(&(argv[j][2]), NULL, 0);
                 break;
             case 'o':
-                strncpy(out_filename, &(argv[j][2]), MAXPATHLEN);
+				out_filename = argv[j]+2;
                 break;
             case 'e':
                 erase = 1;
@@ -253,11 +253,12 @@ void parse_args(int argc, char** argv) {
         }
         else
         {
-            strncpy(in_filename, argv[j], MAXPATHLEN);
+			in_filename = argv[j];	
         }
     }
 }
 
+#ifndef _WIN32
 /* Convert string to upper case */
 void strupr(char* str) {
     char* p = str;
@@ -266,6 +267,7 @@ void strupr(char* str) {
         p++;
     }
 }
+#endif
 
 int main(int argc, char **argv)
 {
@@ -273,7 +275,7 @@ int main(int argc, char **argv)
 
     /* Initialize globals */
     sample_rate = 11250;
-    strncpy(out_filename, "file.wav", MAXPATHLEN);
+	out_filename = "file.wav";
     verbose = 0;
     
     if (argc < 2)
@@ -287,7 +289,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "\n");
         fprintf(stderr, "Usage: %s [options] input-file\n", argv[0]);
         fprintf(stderr, " -b<val>    Starting bank number to program\n");
-        fprintf(stderr, " -e         Erases ROM (MAY ERASE NEIGHBORING PROGRAMS\n\n");
+        fprintf(stderr, " -e         Erases ROM (MAY ERASE NEIGHBORING PROGRAMS)\n\n");
         fprintf(stderr, " -s<val>    Sample rate for WAV file (default %d samples per second)\n", sample_rate);
         fprintf(stderr, " -o<string> Output file name for WAV file (default: %s)\n", out_filename);
         fprintf(stderr, " -v         Print information about the conversion (default: off)\n\n");

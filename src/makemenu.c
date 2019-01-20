@@ -87,6 +87,7 @@ void parse_args(int argc, char** argv) {
     }
 }
 
+#ifndef _WIN32
 /* Convert string to upper case */
 void strupr(char* str) {
     char* p = str;
@@ -95,6 +96,7 @@ void strupr(char* str) {
         p++;
     }
 }
+#endif
 
 int main(int argc, char** argv) {
     FILE* pgm_file = NULL;      /* Binary of the menu code */
