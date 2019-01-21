@@ -7,6 +7,9 @@
  * Date:    Dec 30, 2018
  *
  * Target:  Win32, Linux, MacOS X
+ *
+ * This software is public domain.  The author doesn't care what you
+ * do with it.
  **********************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +38,7 @@ struct {
 } entry;
 
 void usage() {
-    fprintf(stderr, "Usage: makemenu [-b<pgm_file>] <csv_file> <out_file>\n");
+    fprintf(stderr, "Usage: makemenu [-b <pgm_file>] <csv_file> <out_file>\n");
     fprintf(stderr, "Where:\n");
     fprintf(stderr, "   pgm_file - Menu code file (default %s)\n", pgm_file_name);
     fprintf(stderr, "   csv_file - Menu definition file (default %s)\n", menu_file_name);
@@ -60,18 +63,22 @@ void parse_args(int argc, char** argv) {
         if (*argv[j] == '-') {
             switch (tolower(argv[j][1])) {
                 case 'b':
-                    pgm_file_name = argv[j]+2;
+                    if (argc <= ++j) {
+                        fprintf(stderr, "Missing filename\n");
+                        usage();
+                    }
+                    pgm_file_name = argv[j];
                     break;
                 case 'h':
+                    fprintf(stderr, "makemenu 0.9 by Jim Shortz\n\n");
                     usage();
                     break;
                 default:
                     /* Bad option */
                     fprintf(stderr, "Unknown option\n");
                     usage();
-                }
-        }
-        else {
+            }
+        } else {
             switch (anon_args++) {
                 case 0:
                     menu_file_name = argv[j];

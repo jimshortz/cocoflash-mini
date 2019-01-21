@@ -353,7 +353,7 @@ taperr  fcc 32,"TAPE ERROR",13,0
 succ    fcc 13,"SUCCESS",13,0
 again   fcc 13,"ANY KEY TO RETRY",0
 hello   fcc "COCOFLASH MINI LOADER V0.9"
-        fcc 13,"(C)2018 - JIM SHORTZ",13,0
+        fcc 13,"BY JIM SHORTZ",13,0
 
     if  ROM
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

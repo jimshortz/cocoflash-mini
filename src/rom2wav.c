@@ -16,6 +16,7 @@
 #include <libgen.h>
 #include <stdlib.h>
 #include <math.h>
+#include <errno.h>
 
 #define MAXPATHLEN 512
 #define PI 3.1415926
@@ -39,7 +40,7 @@ int             sample_rate;
 uint16          start_bank;
 uint16          kb_count;
 const char*     out_filename;
-const char*     in_filename;
+const char*     in_filename=NULL;
 int             verbose;
 int             erase;
 FILE*           input;
@@ -231,13 +232,35 @@ void parse_args(int argc, char** argv) {
             switch (tolower(argv[j][1]))
             {
             case 'b':
-                start_bank = strtol(&(argv[j][2]), NULL, 0);
+                if (argc <= ++j) {
+                    fprintf(stderr, "Missing bank parameter\n");
+                    exit(1);
+                }
+                errno = 0;
+                start_bank = strtol(argv[j], NULL, 0);
+                if (errno || start_bank < 0 || start_bank >= 2048) {
+                    fprintf(stderr, "Invalid bank parameter: %s\n", argv[j]);
+                    exit(1);
+                }
                 break;
             case 's':
-                sample_rate = strtol(&(argv[j][2]), NULL, 0);
+                if (argc <= ++j) {
+                    fprintf(stderr, "Missing sample rate parameter\n");
+                    exit(1);
+                }
+                errno = 0;
+                sample_rate = strtol(argv[j], NULL, 0);
+                if (errno || sample_rate < 8000 || sample_rate > 96000) {
+                    fprintf(stderr, "Invalid sample rate parameter: %s\n", argv[j]);
+                    exit(1);
+                }
                 break;
             case 'o':
-				out_filename = argv[j]+2;
+                if (argc <= ++j) {
+                    fprintf(stderr, "Missing output file parameter\n");
+                    exit(1);
+                }
+				out_filename = argv[j];
                 break;
             case 'e':
                 erase = 1;
@@ -247,13 +270,14 @@ void parse_args(int argc, char** argv) {
                 break;
             default:
                 /* Bad option */
-                fprintf(stderr, "Unknown option\n");
+                fprintf(stderr, "Unknown option %s\n", argv[j]);
                 exit(1);
             }
-        }
-        else
-        {
+        } else if (in_filename == NULL) {
 			in_filename = argv[j];	
+        } else {
+            fprintf(stderr, "Unknown argument %s\n", argv[j]);
+            exit(1);
         }
     }
 }
@@ -269,9 +293,27 @@ void strupr(char* str) {
 }
 #endif
 
+void copy_filename() {
+    char* fname;
+    int len;
+    char buffer[512];
+
+    strcpy(buffer, in_filename);
+    fname = basename(buffer);
+    len = strlen(fname);
+    strupr(fname);
+
+    if (len < 16) {
+        memcpy(pgm_header.fname, fname, len);
+        memset(pgm_header.fname+len, ' ', 16-len);
+    } else {
+        memcpy(pgm_header.fname, fname, 16);
+    }
+}
+
 int main(int argc, char **argv)
 {
-    uint8*  buffer = malloc(BATCH_SIZE);
+    uint8   buffer[BATCH_SIZE];
 
     /* Initialize globals */
     sample_rate = 11250;
@@ -280,19 +322,18 @@ int main(int argc, char **argv)
     
     if (argc < 2)
     {
+        fprintf(stderr, "rom2wav version 0.9\n\n");
         fprintf(stderr, "Copyright (C) 2007 Tim Lindner\n");
         fprintf(stderr, "Copyright (C) 2013 Tormod Volden\n");
-        fprintf(stderr, "Copyright (C) 2018 Jim Shortz\n");
-        fprintf(stderr, "\n");
+        fprintf(stderr, "Copyright (C) 2018 Jim Shortz\n\n");
         fprintf(stderr, "This program will generate a WAV file from a Color Computer ROM\n");
-        fprintf(stderr, "suitable for downloading using loader.wav\n");
-        fprintf(stderr, "\n");
+        fprintf(stderr, "suitable for downloading using loader.wav\n\n");
         fprintf(stderr, "Usage: %s [options] input-file\n", argv[0]);
-        fprintf(stderr, " -b<val>    Starting bank number to program\n");
-        fprintf(stderr, " -e         Erases ROM (MAY ERASE NEIGHBORING PROGRAMS)\n\n");
-        fprintf(stderr, " -s<val>    Sample rate for WAV file (default %d samples per second)\n", sample_rate);
-        fprintf(stderr, " -o<string> Output file name for WAV file (default: %s)\n", out_filename);
-        fprintf(stderr, " -v         Print information about the conversion (default: off)\n\n");
+        fprintf(stderr, " -b <val>    Starting bank number to program\n");
+        fprintf(stderr, " -e          Erases ROM (MAY ERASE NEIGHBORING PROGRAMS)\n");
+        fprintf(stderr, " -s <val>    Sample rate for WAV file (default %d samples per second)\n", sample_rate);
+        fprintf(stderr, " -o <string> Output file name for WAV file (default: %s)\n", out_filename);
+        fprintf(stderr, " -v          Print information about the conversion (default: off)\n\n");
         fprintf(stderr, "For <val> use 0x prefix for hex, 0 prefix for octal and no prefix for decimal.\n");
 
         exit(1);
@@ -323,15 +364,12 @@ int main(int argc, char **argv)
     write_silence(0.25);
 
     /* Write header block */
-    char fmt[18];
-    sprintf(fmt, "%-16.16s", basename(in_filename));
-    strupr(fmt);
-    memcpy(pgm_header.fname, fmt, 16);
+    copy_filename();
     pgm_header.start_bank = BE_UINT16(start_bank | (erase ? 0x8000 : 0));
     pgm_header.kb_count = BE_UINT16(kb_count);
 
     if (verbose) {
-        printf("Writing header: start_bank=%d erase=%d fname=%s\n", start_bank, erase, fmt);
+        printf("Writing header: start_bank=%d erase=%d fname=%16.16s\n", start_bank, erase, pgm_header.fname);
     }
 
     write_leader();
@@ -375,7 +413,6 @@ int main(int argc, char **argv)
     close_outfile();
     free(buffer_1200);
     free(buffer_2400);
-    free(buffer);
 
     if (verbose) {
         fprintf(stderr, "Generation complete.  To download, type the following command on the CoCo:\n");

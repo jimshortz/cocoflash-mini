@@ -55,11 +55,11 @@ Programming the CocoFLASH is a multi-step process:
 1. Play loader.wav to download the programming software.
 1. Play the WAV file produced in step 2.  This step can be repeated to do
    multiple ROMS.
-1. Press the RESET button
+1. Press the RESET button to exit the loader.
 
 Example:
 ```
-rom2wav -b28 EDTASM.ccc -oedtasm.wav
+rom2wav -b 28 EDTASM.ccc -o edtasm.wav
 ```
 
 Will create generate `edtasm.wav` from the `EDTASM.ccc` binary and place it at
@@ -70,6 +70,10 @@ Passing the `-e` option will cause the target blocks to be erased first.  *Use w
 as this could cause neighboring ROMs to be erased as well due to idiosyncrasies of the 
 CocoFLASH ROM and banking structure.  Consult the CocoFLASH documentation for an explanation
 of this or simply always choose a starting bank of 12 plus a multiple of 16.
+
+If programming fails, you are prompted to press a key.  If it succeeds, the loader listens
+for the next file.  This allows for unattended operation which is useful since this process
+is a bit slow.
 
 # Updating the menu
 
@@ -91,7 +95,7 @@ semicolon).  The parser is pretty lame, so don't get crazy with it :-)
 Process for updating the menu:
 1. Edit `menu.csv` using your editor of choice.
 1. Run `makemenu menu.csv menu.rom` to produce a ROM image.
-1. Run `rom2wav -b0 -e menu.rom -omenu.wav` to produce a WAV file.
+1. Run `rom2wav -b 0 -e menu.rom -o menu.wav` to produce a WAV file.
 1. Type `CLOADM:EXEC` on the CoCo and press ENTER.
 1. Play `loader.wav`.
 1. Play `menu.wav`.
@@ -101,6 +105,30 @@ target ROMs as it makes managing the banks easier.  Also, the downloads
 can be combined into a single session i.e. `loader.wav`, `menu.wav`, `rom1.wav`,
 `rom2.wav`, etc.
 
+# Managing ROM Contents
+
+An additional utility called `map.wav` is included.  This tool lets you view a map
+of the CoCoFLASH ROM banks.  Used banks are drawn with an X and free banks with a -.
+The contents of a bank may be viewed in either hexidecimal or ASCII by pressing H
+or A respectively.  
+
+The map tool can also be used to erase banks by pressing E.  The surrounding banks
+affected by the erase operation will be highlighted and you will be asked to confirm
+the erase.
+
+To run the mapper, type `CLOADM:EXEC` on the CoCo, press ENTER, and play `map.wav`
+from the host computer.
+
+# Keeping ROM tools in ROM
+
+The loader and mapper tools may also be programmed into the CoCoFLASH ROM and
+accessed from the menu.  To accomplish this, ROM-friendly versions of these are
+included as `loader.rom` and `map.rom`.  These may be programmed using
+`loader.wav` as included in `menu.csv` as outlined in the previous section.
+Use a config value of 2.
+
+The ROM versions of these tools return to bank 0 (the menu) on exit.
+
 # Building
 
 Recompiling requires a standard `gcc` toolchain plus the following tools:
@@ -109,6 +137,11 @@ Recompiling requires a standard `gcc` toolchain plus the following tools:
 * `makewav` from the Toolshed project (https://github.com/boisy/toolshed).
 
 After installing these prerequisites, simply type `make` from the `src` directory.
+
+The Win32 version is built by installing mingw-w32 on a Linux host system and
+compling it using `mingw32-make OS=win32`.  If you don't have a Linux host system,
+it should be a trivial exercise to compile them under MinGW on Windows or even
+Visual Studio.
 
 # Credits
 
