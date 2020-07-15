@@ -10,6 +10,7 @@ ROM2WAV=rom2wav
 MAKEMENU=makemenu
 STAGE=cocoflash-mini-0.9
 DIST=$(STAGE)-linux.tar.gz
+PORT=/dev/ttyUSB1
 endif
 
 targets:        $(DIST)
@@ -35,17 +36,24 @@ loader.bin:	loader.asm
 loader.rom:	loader.asm
 	asm6809 -dROM -o loader.rom -l loader.rom.lst loader.asm
 
+serloader.s19:	serloader.asm
+	asm6809 -S -o serloader.s19 -l serloader.lst serloader.asm
+
+upload:	serloader.s19
+	stty 9600 < $(PORT)
+	cat serloader.s19 > $(PORT)
+
 %.wav:	%.bin
 	makewav -n$< -c -r $< -o$@
 
 $(DIST): $(ROM2WAV) $(MAKEMENU) loader.wav map.wav menu.bin loader.rom map.rom 
 ifeq	($(OS),WIN32)
 	-rm $@
-	zip $@ $^
+	zip $@ $^ menu.csv
 else
 	-rm -rf $(STAGE)
 	mkdir $(STAGE)
-	cp $^ $(STAGE)
+	cp $^ menu.csv $(STAGE)
 	strip $(STAGE)/$(ROM2WAV)
 	strip $(STAGE)/$(MAKEMENU)
 	tar -czf $@ $(STAGE)
