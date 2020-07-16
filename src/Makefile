@@ -1,4 +1,4 @@
-CFLAGS=-Wall -O2
+CFLAGS=-Wall -g
 
 ifeq	($(OS),WIN32)
 ROM2WAV=rom2wav.exe
@@ -7,16 +7,20 @@ STAGE=cocoflash-mini-0.9
 DIST=$(STAGE)-win32.zip
 else
 ROM2WAV=rom2wav
+SENDROM=sendrom
 MAKEMENU=makemenu
 STAGE=cocoflash-mini-0.9
 DIST=$(STAGE)-linux.tar.gz
-PORT=/dev/ttyUSB1
+PORT=/dev/ttyUSB0
 endif
 
 targets:        $(DIST)
 
 $(ROM2WAV):	rom2wav.c
 	$(CC) $(CFLAGS) -o $(ROM2WAV) rom2wav.c -lm
+
+$(SENDROM):	sendrom.c
+	$(CC) $(CFLAGS) -o $(SENDROM) sendrom.c
 
 $(MAKEMENU):	makemenu.c
 	$(CC) $(CFLAGS) -o $(MAKEMENU) makemenu.c
@@ -40,7 +44,7 @@ serloader.s19:	serloader.asm
 	asm6809 -S -o serloader.s19 -l serloader.lst serloader.asm
 
 upload:	serloader.s19
-	stty 9600 < $(PORT)
+	stty 9600 cstopb < $(PORT)
 	cat serloader.s19 > $(PORT)
 
 %.wav:	%.bin

@@ -1,0 +1,5 @@
+Dungeons of Daggorath (8KB)
+
+            Clean       Erase
+Serial      12.637      12.851
+Cassette    65.78       66.02
