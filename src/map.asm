@@ -654,13 +654,14 @@ stext   macro
 
 mmenu
         stext   0,24,   "BANK"
-        stext   6,24,   "(E)RASE"
-        stext   7,24,   "(H)EX"
-        stext   8,24,   "(A)SCII"
-        stext   9,24,   "(N)EXT"
-        stext   10,24,  "(P)REV"
-        stext   11,24,  "E(X)IT"
-        stext   14,19,  "COCOMAP 0.9"
+        stext   4,20,   "(D)OWNLOAD"
+        stext   5,20,   "(E)RASE"
+        stext   6,20,   "(H)EX"
+        stext   7,20,   "(A)SCII"
+        stext   8,20,   "(N)EXT"
+        stext   9,20,  "(P)REV"
+        stext   10,20,  "E(X)IT"
+        stext   14,19,  "COCOMAP 1.0"
         stext   15,18,  "BY JIM SHORTZ"
         fdb     $ffff
 

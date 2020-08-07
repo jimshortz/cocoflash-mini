@@ -18,8 +18,7 @@ rom = f.read()
 
 BATCH_SIZE = 1024
 ser = serial.Serial('/dev/ttyUSB0', 38400, timeout=10)
-#bank = 0x800 | 302
-bank = 304
+bank = 304 | 0x8000
 ser.write(create_header(bank, len(rom) // BATCH_SIZE, fname))
 
 # Wait for go ahead signal
