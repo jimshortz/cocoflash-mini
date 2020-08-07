@@ -52,9 +52,9 @@ serloader.s19:	serloader.asm
 sersrv.s19:	sersrv.asm
 	asm6809 -S -o sersrv.s19 -l sersrv.lst sersrv.asm
 
-upload:	sersrv.s19
+upload:	xmodem.s19
 	stty 9600 cstopb < $(PORT)
-	cat sersrv.s19 > $(PORT)
+	cat xmodem.s19 > $(PORT)
 
 %.wav:	%.bin
 	makewav -n$< -c -r $< -o$@

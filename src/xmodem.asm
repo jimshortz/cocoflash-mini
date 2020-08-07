@@ -1,10 +1,13 @@
 romst   equ     $c000
+src_end	equ	$48
 
 ; Hardware registers
 ;config  equ     $ff64
-;fcntrl  equ     config
-;bank_lo equ     config+1
-;bank_hi equ     config+2
+config	equ	$2800
+fcntrl  equ     config
+bank_lo equ     config+1
+bank_hi equ     config+2
+
 
 ; XMODEM constants
 SOH     equ     $1
@@ -13,10 +16,11 @@ EOT     equ     $4
 NAK     equ     $15
 
 
-xmodem  lda     #$01
+	org	$600
+xmodem  orcc	#$50
+	ldd	#$00fc
         sta     bank_hi
-        lda     #$01
-        sta     bank_lo
+        stb     bank_lo
 
         ; XMODEM download
         ldx     #romst
@@ -31,46 +35,57 @@ snak    clra                    ; Reset packet type
         ldy     #132
         jsr     DWRead
         beq     2f
-        lda     btype
+        lda     btype		; Short packet
         cmpa    #EOT            ; Is it EOT?
         beq     done
-        swi                     ; Short packet
         bra     snak
 2       lda     btype
         cmpa    #SOH            ; Is it SOH?
-        beq     3f
-        swi
-        bra     snak
-3       lda     blk             ; Test block number
+	bne	snak		; Unknown packet header
+        lda     blk             ; Test block number
         adda    iblk
         coma
-        beq     4f
-        swi                     ; Bad block number
-4       lda     blk
+	bne	snak		; Corrupted block number
+        lda     blk
         suba    lblk
         beq     sack            ; Resend of previous block - ignore
         deca
-        beq     5f
-        swi                     ; Block out of sequence
-        bra     snak
-5       tfr     y,d             ; B=checksum of all 132 bytes
+	bne	snak		; Wrong block #
+        tfr     y,d             ; B=checksum of all 132 bytes
                                 ; SOT+blk+blki = 0 always
         subb    cksum           ; So we just need to subtract the checksum
         cmpb    cksum           ; And compare to itself again
-        beq     6f
-        swi                     ; Checksum error
-        bra     snak
-6       inc     lblk
-        swi
+	bne	snak		; Checksum error
+        inc     lblk
+	ldx	#bdata
+	ldu	#128
+	ldy	target		; TODO - blank check
         jsr     pgmblk          ; Program the packet
-        swi                     ; DEBUG
-        bne     snak
+        bne     snak		; TODO - better handling
+	sty	target
+	cmpy	#$d000
+	blo	sack
+	lda	bank_hi		; End of window, advance to next bank
+	ldb	bank_lo
+	addd	#1
+	sta	bank_hi
+	stb	bank_lo
+	ldy	#romst
+	sty	target
 sack    lda     #ACK            ; Send ACK and read next packet
         bsr     putc
         bra     1b
 
-done    lda     #ACK
-        ; Fall through
+done    lda     #ACK		; Send final ack
+	bsr	putc
+	andcc 	#$af		; Enable interrupts
+	rts
+
+pgmerr	swi
+	rts
+
+bchkerr	swi
+	rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Write A character to serial port
@@ -80,76 +95,12 @@ putc    sta     $6
         ldy     #1
         jmp     DWWrite
 
-        include     "serio.asm"
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Writes packet of data from target -> ROM
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-pgmblk  ldx         #bdata
-        ldy         target
-        ;orcc        #$50    ;disable interrupts
-        clrb                ; set error count = 0
-loop    cmpx        #cksum  ;have we finished a chunk?
-        beq         exit    ;yes, exit loop
-        incb
-        cmpb        #$ff    ;pass # 255?
-        beq         fail    ;too many attempts, fail
-        lda         #$81    ;set bits for led on and write enable
-        sta         fcntrl  ;send to flash card control register
-        lbsr        preamb  ; set up write sequence
-        lda         #$a0
-        sta         $caaa
-        lda         ,x      ; get data to write to flash
-        sta         ,y      ; write to flash
-ppoll   lda         $c000   ; poll the operation status
-        eora        $c000
-        anda        #$40    ; bits toggling?
-        bne         ppoll   ; yes, keep polling
-        clra
-        sta         fcntrl  ; turns off led and disables write mode
-        pshs        b
-        clrb
-delay   nop
-        incb
-        cmpb        #100
-        ble         delay
-        puls        b
-        lda         ,y      ; load data back
-        cmpa        ,x      ; does it match?
-        bne         reset   ; try again
-        clrb                ; clear error count
-        leax        1,x     ; increment source address
-        leay        1,y     ; increment destination address
-        bra         loop    ; next byte
-
-reset   lda         #$f0    ; reset command
-        sta         $c000   ; send reset
-ppoll2  lda         $c000   ; poll the operation status
-        eora        $c000
-        anda        #$40    ; bits toggling?
-        bne         ppoll2  ; yes, keep polling
-        bra         loop    ; go try again
-
-exit    ;andcc       #$af    ; enable interrupts
-        sta         fcntrl  ; turn off write access and led
-        sty         target
-        clra
-        rts
-
-fail    ;andcc       #$af    ; enable interrupts
-        sta         fcntrl  ; turn off write access and led
-        sty         target
-        lda         #$ff    ; Return non-zero
-        rts
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Writes common "preamble" code to ROM (for both erase and program)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;preamb  lda        #$aa
-;        sta        $caaa
-;        lda        #$55
-;        sta        $c555
-;        rts
+        include "serio.asm"
+;	include	"pgmblk.asm"
+pgmblk	swi
+	leay	128,y
+	clra
+	rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables
