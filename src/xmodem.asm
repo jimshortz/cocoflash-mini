@@ -2,8 +2,8 @@ romst   equ     $c000
 src_end	equ	$48
 
 ; Hardware registers
-;config  equ     $ff64
-config	equ	$2800
+config  equ     $ff64
+;config	equ	$2800
 fcntrl  equ     config
 bank_lo equ     config+1
 bank_hi equ     config+2
@@ -14,11 +14,11 @@ SOH     equ     $1
 ACK     equ     $6
 EOT     equ     $4
 NAK     equ     $15
-
+CAN	equ	$18
 
 	org	$600
 xmodem  orcc	#$50
-	ldd	#$00fc
+	ldd	#$0001
         sta     bank_hi
         stb     bank_lo
 
@@ -30,7 +30,7 @@ xmodem  orcc	#$50
 snak    clra                    ; Reset packet type
         sta     btype
         lda     #NAK            ; Send a NAK
-        bsr     putc
+        jsr     putc
 1       ldx     #btype          ; Read packet
         ldy     #132
         jsr     DWRead
@@ -59,9 +59,11 @@ snak    clra                    ; Reset packet type
         inc     lblk
 	ldx	#bdata
 	ldu	#128
-	ldy	target		; TODO - blank check
+	ldy	target
+	jsr	bcheck		; Blank check
+	bne	bchkerr
         jsr     pgmblk          ; Program the packet
-        bne     snak		; TODO - better handling
+        bne     pgmerr
 	sty	target
 	cmpy	#$d000
 	blo	sack
@@ -82,11 +84,33 @@ done    lda     #ACK		; Send final ack
 	rts
 
 pgmerr	swi
-	rts
+	bra	cancel
 
 bchkerr	swi
+	bra	cancel
+
+cancel	ldx	#cans
+	ldy	#10
+	jsr	DWWrite
 	rts
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Perform blank check
+;
+; Y = target register
+;
+; Returns Z=blank, NZ=dirty
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+bcheck	ldb	#128
+1	lda	,y+	; Read byte
+	coma		; Is it $FF?
+	bne	2f	; Fail if not
+	decb
+	bne	1b
+	leay	-128,y	; Reset to beginning
+	clra
+2	rts
+	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Write A character to serial port
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -101,6 +125,11 @@ pgmblk	swi
 	leay	128,y
 	clra
 	rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Resources
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+cans	fill	CAN,10
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables
