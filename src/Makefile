@@ -43,7 +43,7 @@ loader.bin:	loader.asm
 loader.rom:	loader.asm
 	asm6809 -dROM -o loader.rom -l loader.rom.lst loader.asm
 
-xmodem.s19:	xmodem.asm
+xmodem.s19:	xmodem.asm serio.asm screen.asm pgmblk.asm
 	asm6809 -S -o xmodem.s19 -l xmodem.lst xmodem.asm
 
 serloader.s19:	serloader.asm
