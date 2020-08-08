@@ -1,16 +1,19 @@
+src_end	equ	$16
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Writes 1KB of data from target -> ROM
 ; X = source
 ; Y = target
 ; D = byte count
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-pgmblk  stb	src_end	; Compute end address
+pgmblk  std	src_end	; Compute end address
 	tfr	x,d
 	addd	src_end
 	std	src_end
 	clrb		; set error count = 0
-loop    cmpx	src_end	;have we finished a 1k chunk?
-        beq     exit	;yes, exit loop
+ploop   swi
+	cmpx	src_end	;have we finished a 1k chunk?
+        beq     pexit	;yes, exit loop
         incb
         cmpb    #$ff	;pass # 255?
         beq     fail	;too many attempts, fail
@@ -36,19 +39,19 @@ delay   nop
         puls    b
         lda     ,y     	; load data back
         cmpa    ,x     	; does it match?
-        bne     reset  	; try again
+        bne     pgrst  	; try again
         clrb    	; clear error count
         leax    1,x    	; increment source address
         leay    1,y    	; increment destination address
-        bra     loop   	; next byte
-reset   lda     #$f0   	; reset command
+        bra     ploop   	; next byte
+pgrst   lda     #$f0   	; reset command
         sta     $c000  	; send reset
 ppoll2  lda     $c000  	; poll the operation status
         eora    $c000
         anda    #$40   	; bits toggling?
         bne     ppoll2 	; yes, keep polling
-        bra     loop   	; go try again
-exit    clra
+        bra     ploop   	; go try again
+pexit   clra
         sta	fcntrl 	; turn off write access and led
         rts
 fail    clra
@@ -56,11 +59,3 @@ fail    clra
 	ldx	#$ff
         rts
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Writes common "preamble" code to ROM (for both erase and program)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-preamb  lda        #$aa
-        sta        $caaa
-        lda        #$55
-        sta        $c555
-        rts

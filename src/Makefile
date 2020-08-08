@@ -34,7 +34,7 @@ map.bin:	map.asm
 map.rom:	map.asm
 	asm6809 -dROM -o map.rom -l map.rom.lst map.asm
 
-map.s19:	map.asm
+map.s19:	map.asm screen.asm serio.asm xmlib.asm pgmblk.asm xmodem.asm
 	asm6809 -S -o map.s19 -l map.s19.lst map.asm
 
 loader.bin:	loader.asm
@@ -52,9 +52,9 @@ serloader.s19:	serloader.asm
 sersrv.s19:	sersrv.asm
 	asm6809 -S -o sersrv.s19 -l sersrv.lst sersrv.asm
 
-upload:	xmodem.s19
+upload:	map.s19
 	stty 9600 cstopb < $(PORT)
-	cat xmodem.s19 > $(PORT)
+	cat $< > $(PORT)
 
 %.wav:	%.bin
 	makewav -n$< -c -r $< -o$@

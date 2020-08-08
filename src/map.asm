@@ -484,6 +484,23 @@ drawadr ldy     #addrpos
         jmp     drawwrd
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Perform blank check
+;
+; Y = target register
+;
+; Returns Z=blank, NZ=dirty
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+bcheck	ldb	#128
+1	lda	,y+	; Read byte
+	coma		; Is it $FF?
+	bne	2f	; Fail if not
+	decb
+	bne	1b
+	leay	-128,y	; Reset to beginning
+	clra
+2	rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Erase ROM bank
 ;
 ; Inputs
@@ -518,7 +535,12 @@ preamb  lda        #$aa
         sta        $c555
         rts
 
+; External files
 	include	"screen.asm"
+	include "serio.asm"
+	include "pgmblk.asm"
+	include "xmlib.asm"
+	include "xmodem.asm"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Tables
@@ -541,6 +563,7 @@ mkeys   kmap    'P',    mprev
         kmap    'H',    hmode
         kmap    'A',    amode
         kmap    'E',    emode
+	kmap	'D',	xmodem
         kmap    'X',    exit
         fcb     0
 
@@ -648,5 +671,20 @@ reloc   leax    main,pcr
         blo     1b
         jmp     main
     endif
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Variables
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        org     $01d1   ; Cassette file name buffer
+lblk    rmb     1   	; Current block counter
+xresp	rmb	1
+
+        org     $0200   ; Cassette data buffer
+; XMODEM packet
+btype   rmb     1
+blk     rmb     1
+iblk    rmb     1
+bdata   rmb     128
+cksum   rmb     1
 
         end     main

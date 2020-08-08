@@ -19,8 +19,6 @@ xminit 	orcc	#$50
 	sta	xresp
 	rts
 
-	include	"serio.asm"
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 xmread	clr	btype		; Reset block type
 	ldx	#xresp
@@ -83,19 +81,4 @@ xcancel	ldx	#xcans
 	rts
 
 xcans	fill	CAN,10
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Variables
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        org     $01d1   ; Cassette file name buffer
-lblk    rmb     1   	; Current block counter
-xresp	rmb	1
-
-        org     $0200   ; Cassette data buffer
-; XMODEM packet
-btype   rmb     1
-blk     rmb     1
-iblk    rmb     1
-bdata   rmb     128
-cksum   rmb     1
 
