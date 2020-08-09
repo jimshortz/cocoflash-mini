@@ -28,7 +28,7 @@ $(MAKEMENU):	makemenu.c
 menu.bin:	menu.asm
 	asm6809 -o menu.bin -l menu.lst menu.asm
 
-map.bin:	map.asm
+map.bin:	map.asm screen.asm serio.asm xmlib.asm pgmblk.asm xmodem.asm
 	asm6809 -C -o map.bin -l map.lst map.asm
 
 map.rom:	map.asm

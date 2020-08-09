@@ -13,11 +13,12 @@
 ; This program is used to view and manage ROM banks for a CocoFlash
 ; card.  It runs on any CoCo and requires 2KB of RAM.
 ;
-; The program has 5 distinct modes:
+; The program has 6 distinct modes:
 ;  Map -    Shows a map of ROM banks and free/used status.
 ;  Hex -    Shows contents of a bank in hex.
 ;  ASCII -  Shows contents of a bank in ASCII.
 ;  Erase -  Erases a sector
+;  Download - Programs ROM images from serial port
 ;
 ; Routines for each mode are prefixed with a single character
 ; (m, h, a, e) to indicate the mode.  A mode is entered by calling
@@ -607,9 +608,9 @@ mmenu
         stext   6,20,   "(H)EX"
         stext   7,20,   "(A)SCII"
         stext   8,20,   "(N)EXT"
-        stext   9,20,  "(P)REV"
+        stext   9,20,   "(P)REV"
         stext   10,20,  "E(X)IT"
-        stext   14,19,  "COCOMAP 1.0"
+        stext   14,19,  "COCOMAP ???"
         stext   15,18,  "BY JIM SHORTZ"
         fdb     $ffff
 
@@ -671,20 +672,5 @@ reloc   leax    main,pcr
         blo     1b
         jmp     main
     endif
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Variables
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        org     $01d1   ; Cassette file name buffer
-lblk    rmb     1   	; Current block counter
-xresp	rmb	1
-
-        org     $0200   ; Cassette data buffer
-; XMODEM packet
-btype   rmb     1
-blk     rmb     1
-iblk    rmb     1
-bdata   rmb     128
-cksum   rmb     1
 
         end     main

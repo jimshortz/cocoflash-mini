@@ -11,8 +11,7 @@ pgmblk  std	src_end	; Compute end address
 	addd	src_end
 	std	src_end
 	clrb		; set error count = 0
-ploop   swi
-	cmpx	src_end	;have we finished a 1k chunk?
+ploop  	cmpx	src_end	;have we finished a 1k chunk?
         beq     pexit	;yes, exit loop
         incb
         cmpb    #$ff	;pass # 255?
