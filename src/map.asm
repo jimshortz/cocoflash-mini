@@ -27,7 +27,7 @@
 ; The main loop of the program is a keyboard dispatcher that calls
 ; subroutines listed in a mode-specific key table.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        org     $800
+        org     $1000
         setdp   0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -66,6 +66,15 @@ kright  equ     $09
 kent    equ     $0d
 
 prime   equ     139             ; Sampling interval for blank check
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Global variables
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+page    equ     $41	; First bank displayed on map (hi byte only)
+addr    equ     $42    	; Address within bank to show (hex, ascii mode)
+keymap  equ     $44     ; Active key mapping table
+target	equ	$46	; ROM address to write to
+src_end	equ	$48	; Source address to stop reading from (temp)
 
     if  ROM
         jmp     reloc,pcr
@@ -650,13 +659,6 @@ emenu
         stext   10,22,  "(Y)ES"
         stext   11,22,  "(N)O"
         fdb     $ffff
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Global variables
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-page    rmb     1       ; First bank displayed on map (hi byte only)
-addr    rmb     2       ; Address within bank to show (hex, ascii mode)
-keymap  rmb     2       ; Active key mapping table
 
 
     if  ROM
